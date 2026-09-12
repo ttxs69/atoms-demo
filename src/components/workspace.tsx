@@ -100,6 +100,7 @@ export function Workspace() {
   const [stopped, setStopped] = useState(false);
   const [gateFinding, setGateFinding] = useState<{ code: string; detail: string } | null>(null);
   const [pane, setPane] = useState<'preview' | 'code'>('preview');
+  const [previewOpen, setPreviewOpen] = useState(false);
   const [codeFiles, setCodeFiles] = useState<string[]>([]);
   const [codeFile, setCodeFile] = useState<{ path: string; content: string } | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -378,11 +379,22 @@ export function Workspace() {
           Forge<span>.</span>
         </div>
         <div className="spacer" />
+        {gateFinding ? <span className="pill err">需要确认</span> : null}
+        {stopped && !gateFinding ? <span className="pill">已停止</span> : null}
         {streaming ? <span className="pill run">生成中</span> : null}
-        {fatal ? <span className="pill err">出错了</span> : null}
+        {!streaming && !gateFinding && previewUrl ? (
+          <span className="pill ok">运行中</span>
+        ) : null}
+        <button
+          type="button"
+          className="btn small"
+          onClick={() => setPreviewOpen((v) => !v)}
+        >
+          {previewOpen ? '收起预览' : '预览'}
+        </button>
       </div>
 
-      <div className="body">
+      <div className={previewOpen ? 'body' : 'body preview-collapsed'}>
         <section className="chat" aria-label="对话">
           <div className="chat-scroll">
             {messages.length === 0 ? (
@@ -393,6 +405,28 @@ export function Workspace() {
                   <br />
                   不需要写代码，也不需要注册。
                 </p>
+                <div className="examples">
+                  {[
+                    ['📔', '记录每日心情的应用', '日期、心情等级、备注，数据存在浏览器里'],
+                    ['✅', '一个待办清单', '可增删、可标记完成、可筛选'],
+                    ['⏱️', '番茄钟计时器', '25 分钟倒计时、专注历史记录'],
+                  ].map(([icon, title, sub]) => (
+                    <button
+                      type="button"
+                      key={title}
+                      onClick={() => {
+                        setInput(`做一个${title}：${sub}`);
+                        document.querySelector<HTMLTextAreaElement>('textarea')?.focus();
+                      }}
+                    >
+                      <span className="ex-icon">{icon}</span>
+                      <span>
+                        {title}
+                        <small>{sub}</small>
+                      </span>
+                    </button>
+                  ))}
+                </div>
               </div>
             ) : null}
 

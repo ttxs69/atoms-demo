@@ -366,7 +366,14 @@ details.activity .log {
     flex: 1 1 100%;
     border-right: none;
   }
+  /* 预览在小屏上以全屏覆盖出现，而不是被挤没了 */
   .preview {
+    position: fixed;
+    inset: 48px 0 0 0;
+    z-index: 50;
+    background: var(--n0);
+  }
+  .body.preview-collapsed .preview {
     display: none;
   }
 }
@@ -569,4 +576,44 @@ details.activity .log {
 .gate-card .row {
   display: flex;
   gap: 8px;
+}
+
+/* Layout: collapse timing (ticket 12) -------------------------------------- */
+.body.preview-collapsed .preview {
+  display: none;
+}
+.body.preview-collapsed .chat {
+  border-right: none;
+}
+
+/* Empty-state examples ------------------------------------------------------ */
+.examples {
+  display: grid;
+  gap: 8px;
+  text-align: left;
+}
+.examples button {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  width: 100%;
+  text-align: left;
+  padding: 11px 13px;
+  border: 1px solid var(--n2);
+  border-radius: var(--r);
+  background: #fff;
+  font-size: 13px;
+}
+.examples button:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.ex-icon {
+  font-size: 16px;
+}
+.examples small {
+  display: block;
+  color: var(--n4);
+  font-size: 11px;
+  margin-top: 2px;
 }
