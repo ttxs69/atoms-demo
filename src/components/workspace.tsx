@@ -13,6 +13,12 @@ interface FileEntry {
   state: 'writing' | 'done';
 }
 
+/** One pipeline step the orchestrator ran (install / build / start). */
+interface StepEntry {
+  step: string;
+  url?: string;
+}
+
 /** One assistant turn, assembled from the event stream. */
 interface AgentMessage {
   kind: 'agent';
@@ -20,6 +26,7 @@ interface AgentMessage {
   agentHandle: AgentHandle;
   text: string;
   files: FileEntry[];
+  steps: StepEntry[];
   errors: string[];
 }
 
@@ -52,6 +59,8 @@ export function Workspace() {
   const [input, setInput] = useState('');
   const [streaming, setStreaming] = useState(false);
   const [fatal, setFatal] = useState<string | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [device, setDevice] = useState<'desktop' | 'tablet' | 'mobile'>('desktop');
 
   // One session for the lifetime of the tab. Persisting it is ticket 07's job.
   const sessionIdRef = useRef<string>(`s-${Date.now()}`);
@@ -60,6 +69,19 @@ export function Workspace() {
 
   const applyEvent = useCallback((event: StreamEvent) => {
     setLog((prev) => [...prev, JSON.stringify(event)]);
+
+    // Side effects happen OUTSIDE the state updater. React StrictMode
+    // double-invokes updaters in development; mutating refs or setting other
+    // state inside one would run twice and corrupt the buffered tool args.
+    if (event.type === 'tool_call_start') {
+      toolArgsRef.current.set(event.toolCallId, '');
+    } else if (event.type === 'tool_input_delta') {
+      const buffered =
+        (toolArgsRef.current.get(event.toolCallId) ?? '') + event.argsDelta;
+      toolArgsRef.current.set(event.toolCallId, buffered);
+    } else if (event.type === 'run_step' && event.step === 'preview_ready' && event.url) {
+      setPreviewUrl(event.url);
+    }
 
     setMessages((prev) => {
       // Never mutate objects from the previous render — React (especially
@@ -90,6 +112,7 @@ export function Workspace() {
               agentHandle: event.agentHandle,
               text: '',
               files: [],
+              steps: [],
               errors: [],
             },
           ];
@@ -97,8 +120,7 @@ export function Workspace() {
         case 'text_delta':
           return updateLast((message) => ({ ...message, text: message.text + event.delta }));
 
-        case 'tool_call_start': {
-          toolArgsRef.current.set(event.toolCallId, '');
+        case 'tool_call_start':
           return updateLast((message) => ({
             ...message,
             files: [
@@ -106,12 +128,9 @@ export function Workspace() {
               { toolCallId: event.toolCallId, path: null, bytes: null, state: 'writing' },
             ],
           }));
-        }
 
         case 'tool_input_delta': {
-          const buffered =
-            (toolArgsRef.current.get(event.toolCallId) ?? '') + event.argsDelta;
-          toolArgsRef.current.set(event.toolCallId, buffered);
+          const buffered = toolArgsRef.current.get(event.toolCallId) ?? '';
           const path = extractPath(buffered);
           if (!path) return prev;
           return updateLast((message) => ({
@@ -123,7 +142,6 @@ export function Workspace() {
             ),
           }));
         }
-
         case 'tool_result': {
           const result = event.result as { path?: string; bytes?: number } | null;
           return updateLast((message) => ({
@@ -138,6 +156,17 @@ export function Workspace() {
                   }
                 : file,
             ),
+          }));
+        }
+
+        case 'run_step': {
+          const entry: StepEntry =
+            event.url !== undefined
+              ? { step: event.step, url: event.url }
+              : { step: event.step };
+          return updateLast((message) => ({
+            ...message,
+            steps: [...message.steps, entry],
           }));
         }
 
@@ -252,6 +281,18 @@ export function Workspace() {
                     </div>
                   ))}
 
+                  {message.steps.map((step, index) => (
+                    <div className={`file-line ${step.step === 'preview_ready' ? 'done' : 'writing'}`} key={`${message.messageId}-s${index}`}>
+                      <span className="status">{step.step === 'preview_ready' ? '✓' : '▶'}</span>
+                      <span>
+                        {step.step === 'installing' && '安装依赖 npm install'}
+                        {step.step === 'building' && '构建 npm run build'}
+                        {step.step === 'starting' && '启动开发服务器'}
+                        {step.step === 'preview_ready' && '预览就绪'}
+                      </span>
+                    </div>
+                  ))}
+
                   {message.errors.map((error, index) => (
                     <div className="bub error" key={`${message.messageId}-e${index}`}>
                       {error}
@@ -306,9 +347,45 @@ export function Workspace() {
 
         <section className="preview" aria-label="预览">
           <div className="preview-bar">
-            <span className="pill">尚未生成</span>
+            <button
+              type="button"
+              className={`btn small ${device === 'desktop' ? 'primary' : ''}`}
+              onClick={() => setDevice('desktop')}
+            >
+              桌面
+            </button>
+            <button
+              type="button"
+              className={`btn small ${device === 'tablet' ? 'primary' : ''}`}
+              onClick={() => setDevice('tablet')}
+            >
+              平板
+            </button>
+            <button
+              type="button"
+              className={`btn small ${device === 'mobile' ? 'primary' : ''}`}
+              onClick={() => setDevice('mobile')}
+            >
+              手机
+            </button>
+            <div className="spacer" />
+            {previewUrl ? (
+              <a className="pill" href={previewUrl} target="_blank" rel="noopener noreferrer">
+                ↗ 新标签页
+              </a>
+            ) : (
+              <span className="pill">尚未生成</span>
+            )}
           </div>
-          <div className="preview-stage">预览会在应用能跑起来之后出现</div>
+          <div className="preview-stage">
+            {previewUrl ? (
+              <div className={`device device-${device}`}>
+                <iframe src={previewUrl} title="应用预览" className="preview-frame" />
+              </div>
+            ) : (
+              <span>预览会在应用能跑起来之后出现</span>
+            )}
+          </div>
         </section>
       </div>
     </div>

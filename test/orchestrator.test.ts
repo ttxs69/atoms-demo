@@ -5,10 +5,10 @@ import { createOrchestrator } from '../src/orchestrator/orchestrator.ts';
 import { FakeSandbox } from './fakes/fake-sandbox.ts';
 import { FakeModel } from './fakes/fake-model.ts';
 import { FakeCredits } from './fakes/fake-credits.ts';
-import type { ForgeEvent } from '../src/domain/events.ts';
+import type { StreamEvent } from '../src/domain/events.ts';
 
-async function collect(stream: AsyncIterable<ForgeEvent>): Promise<ForgeEvent[]> {
-  const out: ForgeEvent[] = [];
+async function collect(stream: AsyncIterable<StreamEvent>) {
+  const out: StreamEvent[] = [];
   for await (const event of stream) out.push(event);
   return out;
 }
@@ -40,6 +40,7 @@ test('run() executes write_file so the file actually lands in the sandbox', asyn
           { type: 'tool_input_delta', toolCallId: 't1', argsDelta: '"content":"<h1>hi</h1>"}' },
           { type: 'tool_call_end', toolCallId: 't1' },
         ],
+        [{ type: 'text', delta: 'done' }],
       ],
     }),
     credits: new FakeCredits(),
@@ -47,7 +48,9 @@ test('run() executes write_file so the file actually lands in the sandbox', asyn
 
   await collect(orchestrator.run('session-1', 'make a hello page'));
 
-  assert.deepEqual(sandbox.allPaths(), ['index.html']);
+  // Scaffold files are laid down too (ticket 03); the model's file is what
+  // this test is about.
+  assert.ok(sandbox.allPaths().includes('index.html'));
   const sandboxId = [...sandbox.files.keys()][0]!;
   assert.equal(await sandbox.readFile(sandboxId, 'index.html'), '<h1>hi</h1>');
 });
@@ -62,6 +65,7 @@ test('run() emits tool events around a write_file call', async () => {
           { type: 'tool_input_delta', toolCallId: 't1', argsDelta: '{"path":"a.txt","content":"x"}' },
           { type: 'tool_call_end', toolCallId: 't1' },
         ],
+        [{ type: 'text', delta: 'done' }],
       ],
     }),
     credits: new FakeCredits(),
@@ -71,7 +75,18 @@ test('run() emits tool events around a write_file call', async () => {
 
   assert.deepEqual(
     events.map((event) => event.type),
-    ['agent_started', 'tool_call_start', 'tool_input_delta', 'tool_result', 'agent_done'],
+    [
+      'agent_started',
+      'tool_call_start',
+      'tool_input_delta',
+      'tool_result',
+      'text_delta', // the closing text step ends the loop
+      'run_step', // installing
+      'run_step', // building
+      'run_step', // starting
+      'run_step', // preview_ready
+      'agent_done',
+    ],
   );
 });
 
@@ -101,6 +116,7 @@ test('run() emits an error event when tool arguments are malformed', async () =>
           { type: 'tool_input_delta', toolCallId: 't1', argsDelta: '{"path": truncated' },
           { type: 'tool_call_end', toolCallId: 't1' },
         ],
+        [{ type: 'text', delta: 'done' }],
       ],
     }),
     credits: new FakeCredits(),

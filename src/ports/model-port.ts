@@ -22,6 +22,27 @@ export interface ModelMessage {
   content: string;
 }
 
+/** An assistant turn's tool call, replayed to the model on the next step. */
+export interface ToolCallPart {
+  type: 'tool-call';
+  toolCallId: string;
+  toolName: string;
+  input: unknown;
+}
+
+/** A tool result, fed back so the model can continue the loop. */
+export interface ToolResultPart {
+  type: 'tool-result';
+  toolCallId: string;
+  toolName: string;
+  output: { type: 'text'; value: string };
+}
+
+/** A step message: assistant tool calls, or the tool results answering them. */
+export type StepMessage =
+  | { role: 'assistant'; content: ToolCallPart[] }
+  | { role: 'tool'; content: ToolResultPart[] };
+
 /**
  * Port: the model.
  *
@@ -32,6 +53,6 @@ export interface ModelMessage {
 export interface ModelPort {
   stream(
     agentHandle: AgentHandle,
-    messages: readonly ModelMessage[],
+    messages: readonly (ModelMessage | StepMessage)[],
   ): AsyncIterable<ModelChunk>;
 }

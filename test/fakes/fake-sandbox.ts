@@ -15,11 +15,15 @@ export class FakeSandbox implements SandboxPort {
   /** sandboxId -> (path -> content) */
   readonly files = new Map<string, Map<string, string>>();
   readonly commands: { sandboxId: string; cmd: string }[] = [];
+  readonly background: { sandboxId: string; cmd: string }[] = [];
   readonly killed = new Set<string>();
   readonly paused = new Set<string>();
 
   #nextId = 1;
   #failures: { match: RegExp; output: string; times: number }[] = [];
+
+  /** When true, the readiness probe never succeeds (drives the no-server test). */
+  probeNeverReady = false;
 
   /**
    * Make the next `times` commands matching `match` exit non-zero.
@@ -50,6 +54,7 @@ export class FakeSandbox implements SandboxPort {
   async runCommand(
     sandboxId: string,
     cmd: string,
+    _opts?: { timeoutMs?: number },
   ): Promise<{ exitCode: number; output: string }> {
     this.commands.push({ sandboxId, cmd });
 
@@ -58,7 +63,24 @@ export class FakeSandbox implements SandboxPort {
       failure.times -= 1;
       return { exitCode: 1, output: failure.output };
     }
+    // The dev-server readiness probe: a healthy sandbox answers 200.
+    if (
+      !this.probeNeverReady &&
+      cmd.includes('%{http_code}') &&
+      (cmd.includes('localhost:') || cmd.includes('127.0.0.1:'))
+    ) {
+      return { exitCode: 0, output: '200' };
+    }
     return { exitCode: 0, output: '' };
+  }
+
+  async runBackground(sandboxId: string, cmd: string): Promise<string> {
+    this.background.push({ sandboxId, cmd });
+    return `bg-${this.background.length}`;
+  }
+
+  async getPreviewHost(sandboxId: string, port: number): Promise<string> {
+    return `${port}-${sandboxId}.e2b.app`;
   }
 
   async pause(sandboxId: string): Promise<void> {

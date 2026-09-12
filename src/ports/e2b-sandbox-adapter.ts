@@ -1,6 +1,21 @@
 import { Sandbox } from 'e2b';
 import type { SandboxPort } from './sandbox-port.ts';
 
+/** The pieces of the SDK's CommandResult we read when a command fails. */
+interface CommandResultLike {
+  exitCode?: number;
+  error?: string;
+  stdout?: string;
+  stderr?: string;
+}
+
+/** On failure the useful text can be in any of three places; join what exists. */
+function joinOutput(result: CommandResultLike): string {
+  return [result.error, result.stderr, result.stdout]
+    .filter((part) => part !== undefined && part !== '')
+    .join('\n');
+}
+
 /**
  * Real E2B adapter.
  *
@@ -27,7 +42,7 @@ export class E2BSandboxAdapter implements SandboxPort {
     const sandbox = await Sandbox.create({
       apiKey: this.#apiKey,
       metadata: { workspace_id: workspaceId },
-      lifecycle: { onTimeout: 'pause' },
+      lifecycle: { onTimeout: 'pause', autoResume: true },
     });
     return sandbox.sandboxId;
   }
@@ -47,13 +62,45 @@ export class E2BSandboxAdapter implements SandboxPort {
   async runCommand(
     sandboxId: string,
     cmd: string,
+    opts?: { timeoutMs?: number },
   ): Promise<{ exitCode: number; output: string }> {
     const sandbox = await this.#connect(sandboxId);
-    const result = await sandbox.commands.run(cmd);
-    return {
-      exitCode: result.exitCode,
-      output: result.exitCode === 0 ? result.stdout : result.stderr || result.stdout,
-    };
+    try {
+      const result = await sandbox.commands.run(cmd, {
+        ...(opts?.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
+      });
+      if (!('exitCode' in result)) {
+        return { exitCode: 0, output: '' };
+      }
+      return {
+        exitCode: result.exitCode,
+        output: result.exitCode === 0 ? result.stdout : joinOutput(result),
+      };
+    } catch (err) {
+      // The SDK throws CommandExitError on non-zero exit instead of returning
+      // the result. The real output — npm/tsc diagnostics — is on `.result`.
+      const result = (err as { result?: CommandResultLike }).result;
+      if (result) {
+        return {
+          exitCode: result.exitCode ?? 1,
+          output: joinOutput(result),
+        };
+      }
+      throw err;
+    }
+  }
+
+  async runBackground(sandboxId: string, cmd: string): Promise<string> {
+    const sandbox = await this.#connect(sandboxId);
+    // A background process survives pause when the memory snapshot is kept:
+    // auto-resume brings the dev server back with the sandbox.
+    const process = await sandbox.commands.run(cmd, { background: true });
+    return String(process.pid);
+  }
+
+  async getPreviewHost(sandboxId: string, port: number): Promise<string> {
+    const sandbox = await this.#connect(sandboxId);
+    return sandbox.getHost(port);
   }
 
   async pause(sandboxId: string): Promise<void> {

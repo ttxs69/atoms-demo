@@ -45,11 +45,21 @@ export type ForgeEvent =
  * - `gate_started`  — the two security gates take 5-15s combined; silence reads
  *                     as a hang.
  * - `sandbox_state` — resume takes about a second, but it cannot be silent.
+ * - `run_step`      — the post-generation pipeline (install / build / dev
+ *                     server / preview URL). These steps can each take tens of
+ *                     seconds; without them the gap between the last file
+ *                     write and the preview is a black hole.
  */
 export type TransientEvent =
   | { type: 'plan_ready'; files: readonly string[] }
   | { type: 'gate_started'; gate: string }
-  | { type: 'sandbox_state'; state: 'booting' | 'resuming' | 'ready' | 'paused' };
+  | { type: 'sandbox_state'; state: 'booting' | 'resuming' | 'ready' | 'paused' }
+  | {
+      type: 'run_step';
+      step: 'installing' | 'building' | 'starting' | 'preview_ready';
+      /** Present on preview_ready: the URL the preview iframe should load. */
+      url?: string;
+    };
 
 /**
  * Everything that travels to the browser: durable events plus transient

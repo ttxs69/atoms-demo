@@ -4,7 +4,12 @@ import { streamText } from 'ai';
 import { z } from 'zod';
 import type { LanguageModel } from 'ai';
 import type { AgentHandle } from '../domain/roles.ts';
-import type { ModelChunk, ModelMessage, ModelPort } from './model-port.ts';
+import type {
+  ModelChunk,
+  ModelMessage,
+  ModelPort,
+  StepMessage,
+} from './model-port.ts';
 
 /**
  * Provider-agnostic model adapter.
@@ -43,8 +48,19 @@ const WRITE_FILE_TOOL = {
 const ROLE_INSTRUCTIONS: Record<AgentHandle, string> = {
   lead: `You are Mike, a senior technical lead. Understand what the user wants to build and respond concisely.`,
   pm: `You are Emma, a product manager. Break down the user's request into a clear file list and description that Alex can build from.`,
-  eng: `You are Alex, a full-stack engineer. Build the user's app using React, TypeScript, Tailwind, and shadcn/ui.
-Write every file the app needs. Use write_file for each one. The stack is Vite + React + TypeScript + Tailwind + shadcn.`,
+  eng: `You are Alex, a full-stack engineer. Build the user's app.
+
+The project scaffold ALREADY EXISTS in the workspace: package.json, vite.config.ts (React + Tailwind v4), tsconfig.json, index.html, src/main.tsx (renders <App/>), src/index.css (@import "tailwindcss"). NEVER rewrite these.
+
+Your job — write ONLY the app's own files under src/:
+- src/App.tsx (REQUIRED — main.tsx imports it)
+- Any components/hooks/types the app needs, also under src/
+
+Rules:
+- Imports are relative to each file's own location: from src/utils.ts import from './types' (NOT '../types'); from src/components/X.tsx import from '../types'.
+- All state in React; data persists in localStorage when the app needs saving.
+- Use Tailwind utility classes for all styling. No other libraries.
+- Keep the app in Chinese if the user writes Chinese.`,
 };
 
 export interface LlmEnv {
@@ -74,21 +90,29 @@ class LlmModelAdapter implements ModelPort {
 
   async *stream(
     agentHandle: AgentHandle,
-    messages: readonly ModelMessage[],
+    messages: readonly (ModelMessage | StepMessage)[],
   ): AsyncIterable<ModelChunk> {
     const shared = {
       model: this.#model,
       system: ROLE_INSTRUCTIONS[agentHandle],
-      messages: messages.map((m) => ({ role: m.role, content: m.content })),
+      // The AI SDK accepts plain and step messages in one array.
+      messages: messages as Parameters<typeof streamText>[0]['messages'],
+      // Multi-file scaffolds run 5-8k output tokens deep. The provider default
+      // (4k on some models) truncates mid-turn — the app ends up missing its
+      // biggest file and the build fails with a confusing error.
+      maxOutputTokens: 8000,
     };
 
     // The tool whitelist is part of the role's configuration: only `eng` may
     // write files. Branching keeps the call shape honest instead of passing
     // an empty tool set that would read as "no tools available".
-    const result =
-      agentHandle === 'eng'
-        ? streamText({ ...shared, tools: { write_file: WRITE_FILE_TOOL } })
-        : streamText(shared);
+    // One controlled cast: the SDK's overloads don't align with
+    // exactOptionalPropertyTypes, and the branch above is what keeps the
+    // tool whitelist honest.
+    const result = streamText({
+      ...shared,
+      ...(agentHandle === 'eng' ? { tools: { write_file: WRITE_FILE_TOOL } } : {}),
+    } as Parameters<typeof streamText>[0]);
 
     for await (const part of result.fullStream) {
       switch (part.type) {
@@ -115,6 +139,14 @@ class LlmModelAdapter implements ModelPort {
         case 'tool-input-end':
           yield { type: 'tool_call_end', toolCallId: part.id };
           break;
+
+        case 'error':
+          // Never swallow stream errors: an invalid prompt or provider failure
+          // must surface, not masquerade as an empty response that ends the
+          // generation loop as if the model had finished.
+          throw part.error instanceof Error
+            ? part.error
+            : new Error(JSON.stringify(part.error));
 
         default:
           // Other parts (reasoning, finish, metadata) are not surfaced.
