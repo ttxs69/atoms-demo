@@ -9,6 +9,9 @@
  * precise token measurement. See CONTEXT.md.
  */
 export interface CreditsPort {
-  reserve(sessionId: string, estimatedTokens: number): Promise<{ ok: boolean }>;
+  reserve(
+    sessionId: string,
+    estimatedTokens: number,
+  ): Promise<{ ok: boolean; /** ISO time when the quota resets, shown to the user. */ resetsAt?: string }>;
   settle(sessionId: string, actualTokens: number): Promise<void>;
 }

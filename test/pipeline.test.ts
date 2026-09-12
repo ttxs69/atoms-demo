@@ -558,3 +558,36 @@ test('turn 2 prompt carries the current file manifest', async () => {
   assert.ok(prompt.includes('src/App.tsx'), 'manifest lists the file');
   assert.ok(prompt.includes('const x = 1;'), 'manifest carries current CONTENT');
 });
+
+// ─── ticket 08: credits gate & input edges ────────────────────────────────
+
+test('failed reservation blocks the run before anything happens', async () => {
+  const sandbox = new FakeSandbox();
+  const credits = new FakeCredits({ reserveSucceeds: false });
+  const orchestrator = createOrchestrator({ sandbox, model: new FakeModel({}), credits });
+
+  const events = await collect(orchestrator.run('s-broke', 'make an app'));
+
+  assert.ok(events.some((e) => e.type === 'blocked_credits'), 'blocked event surfaces');
+  assert.ok(!events.some((e) => e.type === 'tool_call_start'), 'not a single tool call');
+  assert.equal(sandbox.files.size, 0, 'no sandbox created for a blocked run');
+  assert.equal(sandbox.commands.length, 0);
+  assert.equal(sandbox.paused.size, 0);
+});
+
+test('a successful run reserves at start and settles at the end', async () => {
+  const credits = new FakeCredits();
+  const orchestrator = createOrchestrator({
+    sandbox: new FakeSandbox(),
+    model: new FakeModel({
+      pm: planTurn(['src/App.tsx']),
+      eng: [writeTurn({ 'src/App.tsx': 'x' }), done],
+    }),
+    credits,
+  });
+
+  await collect(orchestrator.run('s-meter', 'go'));
+
+  assert.equal(credits.reservations.length, 1, 'reserved once');
+  assert.equal(credits.settlements.length, 1, 'settled once');
+});

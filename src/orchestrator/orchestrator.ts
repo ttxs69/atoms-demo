@@ -516,6 +516,15 @@ function parsePlanArgs(raw: string): Plan {
       userInput: string,
       opts?: { signal?: AbortSignal },
     ): AsyncIterable<StreamEvent> {
+      // Reserve BEFORE anything exists: a blocked run must not create a
+      // sandbox, run a model call, or touch the filesystem. blocked_credits
+      // in the state machine is a pre-flight gate, not a failure.
+      const reservation = await deps.credits.reserve(sessionId, 0);
+      if (!reservation.ok) {
+        yield { type: 'blocked_credits', ...(reservation.resetsAt ? { resetsAt: reservation.resetsAt } : {}) };
+        return;
+      }
+
       const sandboxId = await sandboxFor(sessionId);
       // Written this turn — feeds the fix turns so Alex knows the project.
       const pathsWritten = new Set<string>();
@@ -627,6 +636,8 @@ function parsePlanArgs(raw: string): Plan {
           };
         }
       }
+
+      await deps.credits.settle(sessionId, 0);
 
       // Merge everything this turn wrote (including fix rounds) into the
       // session manifest for the next iterate turn.

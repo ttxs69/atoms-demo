@@ -125,6 +125,12 @@ export function Workspace() {
       setPreviewNonce((n) => n + 1);
     } else if (event.type === 'interrupted') {
       setStopped(true);
+    } else if (event.type === 'blocked_credits') {
+      const reset = event.resetsAt ? new Date(event.resetsAt) : null;
+      const when = reset && !Number.isNaN(reset.getTime())
+        ? `明天 ${reset.getHours()} 点恢复`
+        : '明天恢复';
+      setFatal(`今日额度已用完，${when}。第二天再来，或换个更简单的需求减少消耗。`);
     } else if (event.type === 'plan_ready') {
       // Dedupe by path: a duplicated path in the plan would otherwise
       // inflate the denominator and render two rows that both flip.
@@ -441,6 +447,7 @@ export function Workspace() {
 
           <div className="composer">
             <textarea
+              maxLength={4000}
               value={input}
               onChange={(event) => setInput(event.target.value)}
               onKeyDown={(event) => {
