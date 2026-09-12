@@ -469,3 +469,14 @@ details.activity .log {
   display: flex;
   gap: 8px;
 }
+
+/* Turn summary (ticket 07) ------------------------------------------------ */
+.turn-summary {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--ok);
+  background: var(--ok-soft);
+  border: 1px solid #bbf7d0;
+  border-radius: var(--r);
+  padding: 6px 10px;
+}

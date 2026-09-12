@@ -487,3 +487,74 @@ test('the turn after an interrupt knows where it stopped', async () => {
     'next prompt carries the interruption marker',
   );
 });
+
+// ─── ticket 07: multi-turn edits ───────────────────────────────────────────
+
+test('turn 2 modifies only what changed; untouched files byte-identical; install skipped', async () => {
+  const sandbox = new FakeSandbox();
+  const orchestrator = makeOrchestrator(sandbox, {
+    eng: [
+      writeTurn({ 'src/App.tsx': 'v1-original', 'src/components/A.tsx': 'aaa' }),
+      done,
+      writeTurn({ 'src/App.tsx': 'v2-changed' }),
+      done,
+    ],
+  });
+
+  await collect(orchestrator.run('s-iter', '做一个应用'));
+  await collect(orchestrator.run('s-iter', '改成三列'));
+
+  const sid = [...sandbox.files.keys()][0]!;
+  // 未被要求改动的文件保持逐字节不变（ticket 03 实测发现的破坏性重写）
+  assert.equal(await sandbox.readFile(sid, 'src/components/A.tsx'), 'aaa');
+  assert.equal(await sandbox.readFile(sid, 'src/App.tsx'), 'v2-changed');
+  // 第二轮没有新依赖 → 只 install 一次
+  const installs = sandbox.commands.filter((c) => c.cmd.startsWith('npm install')).length;
+  assert.equal(installs, 1, 'install runs on the first turn only');
+  // 两轮各 build 一次
+  const builds = sandbox.commands.filter((c) => c.cmd.includes('run build')).length;
+  assert.equal(builds, 2);
+});
+
+test('turn 2 that touches package.json reinstalls', async () => {
+  const sandbox = new FakeSandbox();
+  const orchestrator = makeOrchestrator(sandbox, {
+    eng: [
+      writeTurn({ 'src/App.tsx': 'v1' }),
+      done,
+      writeTurn({ 'package.json': '{"deps":"new"}', 'src/App.tsx': 'v2' }),
+      done,
+    ],
+  });
+
+  await collect(orchestrator.run('s-dep', 'go'));
+  await collect(orchestrator.run('s-dep', '加个图表库'));
+
+  const installs = sandbox.commands.filter((c) => c.cmd.startsWith('npm install')).length;
+  assert.equal(installs, 2, 'package.json changed → install again');
+});
+
+test('turn 2 prompt carries the current file manifest', async () => {
+  const sandbox = new FakeSandbox();
+  const model = new FakeModel({
+    pm: planTurn(['src/App.tsx']),
+    eng: [
+      writeTurn({ 'src/App.tsx': 'const x = 1;' }),
+      done,
+      writeTurn({ 'src/App.tsx': 'const x = 2;' }),
+      done,
+    ],
+  });
+  const orchestrator = createOrchestrator({ sandbox, model, credits: new FakeCredits() });
+
+  await collect(orchestrator.run('s-ctx2', 'go'));
+  await collect(orchestrator.run('s-ctx2', '再改一下'));
+
+  const secondTurnEng = model.calls
+    .filter((c) => c.agentHandle === 'eng')
+    .find((c) => JSON.stringify(c.messages).includes('再改一下'));
+  const prompt = JSON.stringify(secondTurnEng?.messages ?? []);
+  assert.ok(secondTurnEng, 'found the turn-2 eng call');
+  assert.ok(prompt.includes('src/App.tsx'), 'manifest lists the file');
+  assert.ok(prompt.includes('const x = 1;'), 'manifest carries current CONTENT');
+});

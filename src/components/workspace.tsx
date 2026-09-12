@@ -30,6 +30,8 @@ interface AgentMessage {
   files: FileEntry[];
   steps: StepEntry[];
   errors: string[];
+  /** Set when agent_done arrives — gates the 本轮 summary line. */
+  finished: boolean;
 }
 
 interface UserMessage {
@@ -71,6 +73,7 @@ export function Workspace() {
   const [streaming, setStreaming] = useState(false);
   const [fatal, setFatal] = useState<string | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewNonce, setPreviewNonce] = useState(0);
   const [stopped, setStopped] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const [device, setDevice] = useState<'desktop' | 'tablet' | 'mobile'>('desktop');
@@ -116,7 +119,10 @@ export function Workspace() {
         });
       }
     } else if (event.type === 'run_step' && event.step === 'preview_ready' && event.url) {
+      // Same URL every turn — the nonce remounts the iframe so the preview
+      // actually refreshes to the new build.
       setPreviewUrl(event.url);
+      setPreviewNonce((n) => n + 1);
     } else if (event.type === 'interrupted') {
       setStopped(true);
     } else if (event.type === 'plan_ready') {
@@ -177,6 +183,7 @@ export function Workspace() {
               files: [],
               steps: [],
               errors: [],
+              finished: false,
             },
           ];
 
@@ -240,6 +247,9 @@ export function Workspace() {
             ...message,
             errors: [...message.errors, event.message],
           }));
+
+        case 'agent_done':
+          return updateLast((message) => ({ ...message, finished: true }));
 
         default:
           // Transient progress events are logged but have no home in the
@@ -383,6 +393,13 @@ export function Workspace() {
                     ),
                   )}
 
+                  {message.finished && message.agentHandle === 'eng' && message.files.length > 0 ? (
+                    <div className="turn-summary">
+                      本轮改了 {message.files.length} 个文件：
+                      {message.files.map((f) => f.path).filter(Boolean).join('、')}
+                    </div>
+                  ) : null}
+
                   {message.errors.map((error, index) => (
                     <div className="bub error" key={`${message.messageId}-e${index}`}>
                       {error}
@@ -524,7 +541,12 @@ export function Workspace() {
           <div className="preview-stage">
             {previewUrl ? (
               <div className={`device device-${device}`}>
-                <iframe src={previewUrl} title="应用预览" className="preview-frame" />
+                <iframe
+                  key={`${previewUrl}-${previewNonce}`}
+                  src={previewUrl}
+                  title="应用预览"
+                  className="preview-frame"
+                />
               </div>
             ) : (
               <span>预览会在应用能跑起来之后出现</span>

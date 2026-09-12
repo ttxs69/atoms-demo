@@ -92,6 +92,14 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
   const interruptedSessions = new Set<string>();
 
   /**
+   * Every path ever written per session. Turn 2+ builds a current-code
+   * manifest from these (read live from the sandbox) — the model sees what
+   * exists NOW, which beats replaying conversation history: bounded, always
+   * fresh, and immune to the destructive-rewrite failure (ticket 03 finding).
+   */
+  const sessionPaths = new Map<string, Set<string>>();
+
+  /**
    * Single writer per session (spec: 工作区写入是单写者). Concurrent run()s —
    * double submit, second tab, direct API — queue behind each other instead
    * of racing appExists and double-writing the sandbox.
@@ -220,10 +228,16 @@ function parsePlanArgs(raw: string): Plan {
   async function* runPipeline(
     sandboxId: string,
     pathsWritten: Set<string>,
+    needsInstall = true,
   ): AsyncGenerator<StreamEvent> {
     try {
-      yield { type: 'run_step', step: 'installing' };
-      await runCommandOrFail(sandboxId, 'npm install --no-audit --no-fund', 'npm install');
+      // Round 2+ without dependency changes skips install: node_modules
+      // survives in the sandbox's filesystem, and a no-op install still
+      // costs tens of seconds (the prototype's iterate variant found this).
+      if (needsInstall) {
+        yield { type: 'run_step', step: 'installing' };
+        await runCommandOrFail(sandboxId, 'npm install --no-audit --no-fund', 'npm install');
+      }
 
       // Bounded self-repair: a build failure is a technical problem, so the
       // orchestrator feeds the raw error back to Alex and rebuilds. The
@@ -283,6 +297,7 @@ function parsePlanArgs(raw: string): Plan {
             sandboxId,
           );
           yield { type: 'agent_done', agentHandle: 'eng', creditsUsed: 0 };
+          for (const path of fix.paths) pathsWritten.add(path);
 
           if (fix.filesWritten === 0) {
             // A repair round that changed nothing cannot fix the build —
@@ -514,6 +529,27 @@ function parsePlanArgs(raw: string): Plan {
       // On iterate turns (the app exists) planning is skipped entirely —
       // modification scope is small and the preview is already visible.
       let engPrompt = userInput;
+      const knownPaths = sessionPaths.get(sessionId);
+      if (!isFirstTurn && knownPaths && knownPaths.size > 0) {
+        // Iterate turn: the model gets the CURRENT code, not a history
+        // replay — it can only rewrite what it can see, and it can see
+        // everything that exists.
+        const manifest: string[] = [];
+        for (const path of [...knownPaths].sort()) {
+          try {
+            manifest.push(`--- ${path} ---\n${await deps.sandbox.readFile(sandboxId, path)}`);
+          } catch {
+            manifest.push(`--- ${path} --- (unreadable)`);
+          }
+        }
+        engPrompt = [
+          'The project currently contains these files:',
+          '',
+          manifest.join('\n\n'),
+          '',
+          `User request (modify what is needed, leave everything else EXACTLY as is): ${userInput}`,
+        ].join('\n');
+      }
       if (interruptedSessions.has(sessionId)) {
         interruptedSessions.delete(sessionId);
         engPrompt = `（上一轮在此处被中断，已写入的文件都在。）\n\n${userInput}`;
@@ -575,9 +611,11 @@ function parsePlanArgs(raw: string): Plan {
       }
 
       if (engResult.filesWritten > 0) {
+        for (const path of engResult.paths) pathsWritten.add(path);
         try {
-          for (const path of engResult.paths) pathsWritten.add(path);
-          for await (const stepEvent of runPipeline(sandboxId, pathsWritten)) {
+          const needsInstall =
+            isFirstTurn || pathsWritten.has('package.json');
+          for await (const stepEvent of runPipeline(sandboxId, pathsWritten, needsInstall)) {
             if (opts?.signal?.aborted) break;
             yield stepEvent;
           }
@@ -588,6 +626,14 @@ function parsePlanArgs(raw: string): Plan {
             message: error instanceof Error ? error.message : String(error),
           };
         }
+      }
+
+      // Merge everything this turn wrote (including fix rounds) into the
+      // session manifest for the next iterate turn.
+      if (pathsWritten.size > 0) {
+        const sessionSet = sessionPaths.get(sessionId) ?? new Set<string>();
+        for (const path of pathsWritten) sessionSet.add(path);
+        sessionPaths.set(sessionId, sessionSet);
       }
 
       yield { type: 'agent_done', agentHandle: 'eng', creditsUsed: 0 };
