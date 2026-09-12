@@ -11,10 +11,26 @@ import type {
 import type { SandboxPort } from '../ports/sandbox-port.ts';
 import { SCAFFOLD_FILES } from './scaffold.ts';
 
+/**
+ * The security gate (RLS template + Security Advisor scan in production).
+ * Injected: the real implementation arrives with forge-app-backend; the
+ * state machine edge and its presentation are core-loop concerns.
+ *
+ * A gate failure is TERMINAL for the run — it must never feed the
+ * bounded self-repair loop (a technical build failure is fixable; an
+ * unsafe data-isolation policy is not something to retry past).
+ */
+export interface GatePort {
+  check(
+    sandboxId: string,
+  ): Promise<{ ok: true } | { ok: false; code: string; detail: string }>;
+}
+
 export interface OrchestratorDeps {
   sandbox: SandboxPort;
   model: ModelPort;
   credits: CreditsPort;
+  gate?: GatePort;
 }
 
 export interface Orchestrator {
@@ -90,6 +106,12 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
    * repeating finished work.
    */
   const interruptedSessions = new Set<string>();
+
+  /**
+   * Sessions whose last run failed the gate, with the finding. The next
+   * run prepends the finding to Alex's prompt ('让 Alex 重写').
+   */
+  const gateFailedSessions = new Map<string, { code: string; detail: string }>();
 
   /**
    * Every path ever written per session. Turn 2+ builds a current-code
@@ -226,6 +248,7 @@ function parsePlanArgs(raw: string): Plan {
    * and the memory snapshot keeps the dev server alive across the pause.
    */
   async function* runPipeline(
+    sessionId: string,
     sandboxId: string,
     pathsWritten: Set<string>,
     needsInstall = true,
@@ -237,6 +260,21 @@ function parsePlanArgs(raw: string): Plan {
       if (needsInstall) {
         yield { type: 'run_step', step: 'installing' };
         await runCommandOrFail(sandboxId, 'npm install --no-audit --no-fund', 'npm install');
+      }
+
+      // Security gate: between install and build (state machine:
+      // installing → migrating → gating → building). Absent gate = pass
+      // through (forge-app-backend injects the real one). A FAILED gate is
+      // terminal: rollback semantics belong to the gate itself; here we
+      // stop, surface the finding, and remember it for the rewrite turn.
+      if (deps.gate) {
+        yield { type: 'gate_started', gate: 'security' };
+        const verdict = await deps.gate.check(sandboxId);
+        if (!verdict.ok) {
+          gateFailedSessions.set(sessionId, { code: verdict.code, detail: verdict.detail });
+          yield { type: 'gate_failed', code: verdict.code, detail: verdict.detail };
+          return;
+        }
       }
 
       // Bounded self-repair: a build failure is a technical problem, so the
@@ -564,6 +602,16 @@ function parsePlanArgs(raw: string): Plan {
         engPrompt = `（上一轮在此处被中断，已写入的文件都在。）\n\n${userInput}`;
         userInput = engPrompt;
       }
+      const gateFinding = gateFailedSessions.get(sessionId);
+      if (gateFinding) {
+        gateFailedSessions.delete(sessionId);
+        engPrompt = [
+          `上一轮的安全检查未通过，已回滚：${gateFinding.code} — ${gateFinding.detail}`,
+          '重写这部分，使数据访问策略安全。不要动其他文件。',
+          '',
+          engPrompt,
+        ].join('\n');
+      }
       if (isFirstTurn) {
         yield { type: 'agent_started', agentHandle: 'pm', messageId: `msg-${++messageCounter}` };
         const pmResult = yield* runAgentSteps(
@@ -624,7 +672,7 @@ function parsePlanArgs(raw: string): Plan {
         try {
           const needsInstall =
             isFirstTurn || pathsWritten.has('package.json');
-          for await (const stepEvent of runPipeline(sandboxId, pathsWritten, needsInstall)) {
+          for await (const stepEvent of runPipeline(sessionId, sandboxId, pathsWritten, needsInstall)) {
             if (opts?.signal?.aborted) break;
             yield stepEvent;
           }

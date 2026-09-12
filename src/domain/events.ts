@@ -53,6 +53,7 @@ export type ForgeEvent =
 export type TransientEvent =
   | { type: 'plan_ready'; files: readonly string[] }
   | { type: 'gate_started'; gate: string }
+  | { type: 'gate_failed'; code: string; detail: string }
   | { type: 'sandbox_state'; state: 'booting' | 'resuming' | 'ready' | 'paused' }
   | { type: 'interrupted'; reason: 'user' | 'disconnect' }
   | { type: 'blocked_credits'; resetsAt?: string }

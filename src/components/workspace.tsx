@@ -98,6 +98,7 @@ export function Workspace() {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewNonce, setPreviewNonce] = useState(0);
   const [stopped, setStopped] = useState(false);
+  const [gateFinding, setGateFinding] = useState<{ code: string; detail: string } | null>(null);
   const [pane, setPane] = useState<'preview' | 'code'>('preview');
   const [codeFiles, setCodeFiles] = useState<string[]>([]);
   const [codeFile, setCodeFile] = useState<{ path: string; content: string } | null>(null);
@@ -151,6 +152,8 @@ export function Workspace() {
       setPreviewNonce((n) => n + 1);
     } else if (event.type === 'interrupted') {
       setStopped(true);
+    } else if (event.type === 'gate_failed') {
+      setGateFinding({ code: event.code, detail: event.detail });
     } else if (event.type === 'blocked_credits') {
       const reset = event.resetsAt ? new Date(event.resetsAt) : null;
       const when = reset && !Number.isNaN(reset.getTime())
@@ -510,6 +513,37 @@ export function Workspace() {
               aria-label="描述你想做的东西"
               disabled={streaming}
             />
+            {gateFinding ? (
+              <div className="gate-card">
+                <h4>⚠ 安全检查未通过</h4>
+                <p>
+                  检测到一条过宽的数据访问策略，<strong>已回滚，未对外暴露任何数据</strong>。
+                  Alex 会重写这部分 —— 安全问题不自动重试，需要你确认后继续。
+                </p>
+                <details className="fix-detail">
+                  <summary>查看详情</summary>
+                  <pre>
+                    {gateFinding.code}
+                    {'\n'}
+                    {gateFinding.detail}
+                  </pre>
+                </details>
+                <div className="row">
+                  <button
+                    type="button"
+                    className="btn primary"
+                    onClick={() => {
+                      setGateFinding(null);
+                      setInput('让 Alex 重写');
+                      document.querySelector<HTMLTextAreaElement>('textarea')?.focus();
+                    }}
+                  >
+                    让 Alex 重写
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
             {stopped ? (
               <div className="stopped-banner">
                 <span>已停止 —— 已生成的文件都保留了。</span>

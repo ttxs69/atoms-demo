@@ -591,3 +591,91 @@ test('a successful run reserves at start and settles at the end', async () => {
   assert.equal(credits.reservations.length, 1, 'reserved once');
   assert.equal(credits.settlements.length, 1, 'settled once');
 });
+
+// ─── ticket 11: gate failure stops and waits — never auto-retries ─────────
+
+test('a failed gate stops the run: no build, no autofix, files kept, gate_failed surfaces', async () => {
+  const sandbox = new FakeSandbox();
+  const gate = {
+    check: async () =>
+      ({ ok: false, code: 'LINT_0024_PERMISSIVE_RLS_POLICY', detail: 'table: notes — policy USING (true)' }) as const,
+  };
+  const model = new FakeModel({
+    pm: planTurn(['src/App.tsx']),
+    eng: [writeTurn({ 'src/App.tsx': 'x', 'migrations/001.sql': 'CREATE TABLE notes...' }), done],
+  });
+  const orchestrator = createOrchestrator({
+    sandbox,
+    model,
+    credits: new FakeCredits(),
+    gate,
+  });
+
+  const events = await collect(orchestrator.run('s-gate', 'make a notes app'));
+
+  const gateFailed = events.find((e): e is Extract<StreamEvent, { type: 'gate_failed' }> => e.type === 'gate_failed');
+  assert.ok(gateFailed, 'gate_failed event surfaces');
+  assert.ok(gateFailed.code.includes('LINT_0024'), 'carries the policy code');
+  assert.ok(events.some((e) => e.type === 'gate_started'), 'gate_started announces the check');
+
+  // THE invariant: nothing after the failure — no build, no autofixing.
+  const idx = events.findIndex((e) => e.type === 'gate_failed');
+  const after = events.slice(idx + 1);
+  assert.ok(!after.some((e) => e.type === 'run_step' && (e.step === 'building' || e.step === 'autofixing')),
+    'no build, no autofix after gate_failed');
+  assert.ok(!after.some((e) => e.type === 'error'), 'not the generic error path');
+
+  // Files (including the migration that failed the gate) are preserved.
+  assert.ok(sandbox.allPaths().includes('migrations/001.sql'));
+  assert.equal(sandbox.paused.size, 1, 'still pauses');
+});
+
+test('a passing gate continues to build', async () => {
+  const orchestrator = createOrchestrator({
+    sandbox: new FakeSandbox(),
+    model: new FakeModel({
+      pm: planTurn(['src/App.tsx']),
+      eng: [writeTurn({ 'src/App.tsx': 'x' }), done],
+    }),
+    credits: new FakeCredits(),
+    gate: { check: async () => ({ ok: true }) as const },
+  });
+
+  const events = await collect(orchestrator.run('s-gateok', 'go'));
+  assert.ok(events.some((e) => e.type === 'run_step' && e.step === 'building'));
+  assert.ok(events.some((e) => e.type === 'run_step' && e.step === 'preview_ready'));
+});
+
+test('the turn after a gate failure carries the rewrite context', async () => {
+  const sandbox = new FakeSandbox();
+  const model = new FakeModel({
+    pm: [...planTurn(['src/App.tsx']), ...planTurn(['src/App.tsx'])],
+    eng: [
+      writeTurn({ 'src/App.tsx': 'x' }),
+      done,
+      writeTurn({ 'src/App.tsx': 'safe' }),
+      done,
+    ],
+  });
+  // 有状态门控：第一次失败，之后放行
+  let firstCall = true;
+  const orchestrator = createOrchestrator({
+    sandbox,
+    model,
+    credits: new FakeCredits(),
+    gate: {
+      check: async () =>
+        firstCall
+          ? ((firstCall = false), { ok: false as const, code: 'LINT_0024', detail: 'notes USING(true)' })
+          : { ok: true as const },
+    },
+  });
+
+  await collect(orchestrator.run('s-rewrite', 'make a notes app'));
+  await collect(orchestrator.run('s-rewrite', '让 Alex 重写'));
+
+  const rewriteCall = model.calls
+    .filter((c) => c.agentHandle === 'eng')
+    .find((c) => JSON.stringify(c.messages).includes('LINT_0024'));
+  assert.ok(rewriteCall, 'the gate finding travels into the rewrite prompt');
+});
