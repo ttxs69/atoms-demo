@@ -4,6 +4,23 @@
 - 依据：`docs/01-atoms-core-features.md`、`docs/02-prd.md`
 - 抓取时间：2026-09-12
 
+> ## ⚠️ 本文档大半已失效（2026-09-12 标注）
+>
+> 这份 v1.0 架构是在 wayfinding 之前写的。`.scratch/forge-mvp/` 的 14 张决策票
+> **推翻了它的多个基础前提**。在实现阶段重写之前，**以地图为准，不要以本文档为准**：
+>
+> | 本文档写的 | 实际决策 | 依据 |
+> |---|---|---|
+> | gVisor / Firecracker 自建沙箱、k8s node pool（§ 沙箱层、§ 部署） | **E2B 托管沙箱** | ticket 12 |
+> | 自研 BaaS，per-project schema / namespace | **共享 Supabase 项目 + RLS 多租户** | ticket 04 / 08 |
+> | Kubernetes（EKS/GKE）+ 多 namespace | **Railway 长驻单机 + cron service** | ticket 14 |
+> | 版本快照 + `schema_migrations[]` down migration 回滚 | **回滚已砍**（正是为了避开 schema 可逆性死结） | ticket 10 |
+> | WebContainer 相关的 COOP/COEP 宿主约束 | 随 WebContainer 一起废弃 | ticket 01 / 12 |
+>
+> **仍然成立**的关键决策：发布产物必须放**独立注册域**下的子域（ticket 05 / 12 的硬安全约束）。
+>
+> 权威来源：`.scratch/forge-mvp/map.md`（Decisions so far）。
+
 ---
 
 ## 1. 整体架构概览

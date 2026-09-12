@@ -16,6 +16,8 @@
 
 - **仓库**：`/Users/sarace/dev/probe/atoms_demo`。不是 git 仓库、未配置 issue tracker，
   按 wayfinder 约定回落到 **local markdown tracker**（`.scratch/`）。
+  ⚠️ 这里原文写着“不是 git 仓库”，但在 charting 之后建了：现在是 git 仓库，
+  remote `git@github.com:ttxs69/atoms-demo.git`，工作在 `main` 上。
 - **原料**（来自对 help.atoms.dev 全量 62 篇官方文档的逆向）：
   - `docs/01-atoms-core-features.md` — 核心功能总结
   - `docs/02-prd.md` — PRD（含 9 条与 Atoms 的差异化清单、5 个开放问题）
@@ -26,7 +28,8 @@
 - **资源**：AI agent 写代码，LLM 预算不设限
 - **每个 session 应加载的技能**：`/grilling`、`/domain-modeling`；问题落在"长什么样 / 怎么表现"时用 `/prototype`
 - **技术栈基线**：TypeScript + React + Tailwind + shadcn/ui
-- **术语表**：本 effort 的 `CONTEXT.md` 尚未建立，`/domain-modeling` 在术语首次定型时创建
+- **术语表**：`CONTEXT.md`（仓库根）已于 2026-09-12 建立——
+  产品层 / 沙箱 / 生成循环 / 身份额度回收 / 部署 / 状态可见性六组的唯一定义源
 
 ### ⚠️ 派子 agent 时必须显式加载 extension
 
