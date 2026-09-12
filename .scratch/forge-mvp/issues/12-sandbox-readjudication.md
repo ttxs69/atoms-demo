@@ -1,7 +1,7 @@
 # 12 — 沙箱策略重新裁决
 
 Type: grilling
-Status: open
+Status: resolved
 Blocked by: —
 
 ## Question
@@ -51,4 +51,55 @@ Q5 原本裁定 WebContainer，理由是"服务端零执行，恶意代码问题
 
 ## Answer
 
-<!-- filled on resolution -->
+Resolved 2026-09-12.
+
+**决策：改用 E2B（路线 a）。发布产物放独立注册域的独立子域（路线 a）。**
+
+### 沙箱：E2B
+
+流量预期：个位数到几十人，峰值并发 < 5。
+E2B Hobby 层（$0/月 + $100 一次性额度、20 并发、单次连续运行 1 小时）完全覆盖这个量级。
+按默认 2vCPU/4GiB 规格（$0.166/hr）折算，$100 ≈ 600 沙箱小时；
+一次生成 + 预览约占 4 分钟，$100 额度约合 9,000 次，Demo 规模下实际花费趋近于零。
+
+**工作区持久化 —— 这是本条决策成立的关键。**
+E2B 的 pause/resume 保留 filesystem 与内存状态，且 paused 沙箱**无限期保留**、
+无 TTL、无自动删除；resume 约 1 秒。设 `onTimeout: 'pause'` 后，
+连续运行 1 小时到期会自动暂停而非销毁，用户下次回来 resume 继续，连续运行计时重置。
+这条消除了「1 小时上限意味着会话寿命只有 1 小时」的误解。
+
+**威胁模型位移。** 风险从访客侧回到平台侧：现在是我们承载不可信代码的执行。
+Firecracker microVM（KVM，guest 自带内核）提供隔离，但出站控制、资源配额、
+滥用检测的责任重新落到我们身上。ticket 05 的访客侧分析作废，需重写。
+
+**未决的运维细节（不阻塞本决策，实现时处理）：**
+- 无「N 天后自动清理」配置项。paused 沙箱不会自己过期，只有显式 `kill()` 才删除。
+  意味着**我们必须自己写回收策略**，否则沙箱会无限累积占满 Hobby 层的 10 GiB 存储。
+- pause 耗时约 4 秒/GiB RAM（4 GiB 沙箱 ≈ 16 秒），且节点快照繁忙时会返回 503
+  `ServiceBusyError`，SDK 建议重试。批量生成时的暂停开销需要纳入时序设计。
+- resume 后沙箱内的服务能重新访问，但客户端连接需要重连。
+
+### 发布产物：独立注册域的独立子域
+
+每个发布的应用分配形如 `abc123.forge-app.com` 的子域，与 Forge 主域（如 `forge.app`）
+落在**不同的注册域**。
+
+为什么必须是不同注册域而不是同一注册域下的子域：cookie 的作用域是按注册域（eTLD+1）划分的，
+若主域设了 `Domain=.forge.app` 的 cookie，`user-app.forge.app` 上的 JavaScript
+发起的请求会自动携带该 cookie。分开注册域后，浏览器层面直接切断了这条路径，
+不需要依赖 `document.domain` 是否被弃用这类细节。
+
+实现成本：一张通配符 TLS 证书覆盖全部子域。
+
+### 连带更新
+
+- **ticket 05** 威胁模型需重写：访客侧风险消失，平台侧攻击面回归
+- **ticket 09** 预览机制改变：预览 URL 由 E2B 端口转发暴露
+- **ticket 10** 现解锁，可开始
+
+### 证据
+
+- `research/webcontainer-licensing-verified.md` — WebContainer 许可结论、E2B 定价与隔离模型
+- `research/browser-untrusted-code-threat-model-verified.md` — 原威胁分析
+- <https://e2b.dev/docs/sandbox/persistence> — pause/resume 语义、无限期保留、
+  ``onTimeout``、403/503 行为、pause 性能
