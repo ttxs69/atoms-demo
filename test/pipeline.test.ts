@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { createOrchestrator } from '../src/orchestrator/orchestrator.ts';
 import { FakeSandbox } from './fakes/fake-sandbox.ts';
 import { FakeModel, type ScriptedTurn } from './fakes/fake-model.ts';
+import { planTurn } from './fakes/plan-turn.ts';
 import { FakeCredits } from './fakes/fake-credits.ts';
 import type { StreamEvent } from '../src/domain/events.ts';
 
@@ -29,10 +30,16 @@ function writeTurn(files: Record<string, string>) {
   ]).flat();
 }
 
-function makeOrchestrator(sandbox: FakeSandbox, turns: { eng: ScriptedTurn[] }) {
+function makeOrchestrator(
+  sandbox: FakeSandbox,
+  turns: { eng: ScriptedTurn[]; pm?: ScriptedTurn[] },
+) {
+  // First turns plan by definition now; a default pm script keeps the older
+  // tests honest about the new flow without repeating the plan everywhere.
+  const pm = turns.pm ?? planTurn(['src/App.tsx']);
   return createOrchestrator({
     sandbox,
-    model: new FakeModel(turns),
+    model: new FakeModel({ ...turns, pm }),
     credits: new FakeCredits(),
   });
 }
@@ -171,4 +178,123 @@ test('dev server that never answers produces an error, not preview_ready', async
   assert.ok(events.some((e) => e.type === 'error' && e.message.includes('dev server')));
   assert.ok(!events.some((e) => e.type === 'run_step' && e.step === 'preview_ready'));
   assert.equal(sandbox.paused.size, 1, 'still pauses even when the server never answered');
+});
+
+// ─── ticket 04: Emma plans first, skeleton-first file tree ────────────────
+
+test('first turn: pm plans, plan_ready precedes the first write_file', async () => {
+  const sandbox = new FakeSandbox();
+  const orchestrator = makeOrchestrator(sandbox, {
+    pm: planTurn(['src/App.tsx', 'src/components/MoodCard.tsx']),
+    eng: [writeTurn({ 'src/App.tsx': 'a' }), done],
+  });
+
+  const events = await collect(orchestrator.run('s-plan', 'make a mood app'));
+
+  const types = events.map((e) => e.type);
+  const planAt = types.indexOf('plan_ready');
+  const firstWriteAt = events.findIndex(
+    (e) => e.type === 'tool_call_start' && e.toolName === 'write_file',
+  );
+  assert.ok(planAt !== -1, 'plan_ready emitted');
+  assert.ok(firstWriteAt !== -1, 'a write_file happened');
+  assert.ok(planAt < firstWriteAt, 'plan_ready precedes the first write');
+
+  const plan = events[planAt] as unknown as { files: string[] };
+  assert.deepEqual(plan.files, ['src/App.tsx', 'src/components/MoodCard.tsx']);
+});
+
+test('first turn: pm runs then eng, each with their own started/done events', async () => {
+  const sandbox = new FakeSandbox();
+  const orchestrator = makeOrchestrator(sandbox, {
+    pm: planTurn(['src/App.tsx']),
+    eng: [writeTurn({ 'src/App.tsx': 'a' }), done],
+  });
+
+  const events = await collect(orchestrator.run('s-roles', 'go'));
+  const seq = events
+    .filter((e) => e.type === 'agent_started' || e.type === 'agent_done')
+    .map((e) => `${e.type}:${e.agentHandle}`);
+
+  assert.deepEqual(seq, ['agent_started:pm', 'agent_done:pm', 'agent_started:eng', 'agent_done:eng']);
+});
+
+test("Emma's plan is injected into Alex's prompt", async () => {
+  const sandbox = new FakeSandbox();
+  const model = new FakeModel({
+    pm: planTurn(['src/App.tsx', 'src/theme.css'], 'A mood tracker.'),
+    eng: [writeTurn({ 'src/App.tsx': 'a' }), done],
+  });
+  const orchestrator = createOrchestrator({
+    sandbox,
+    model,
+    credits: new FakeCredits(),
+  });
+
+  await collect(orchestrator.run('s-inject', 'go'));
+
+  const engCall = model.calls.find((c) => c.agentHandle === 'eng');
+  const engPrompt = JSON.stringify(engCall?.messages ?? []);
+  assert.ok(engPrompt.includes('src/App.tsx'), 'file list in eng prompt');
+  assert.ok(engPrompt.includes('src/theme.css'), 'second file in eng prompt');
+  assert.ok(engPrompt.includes('A mood tracker.'), 'description in eng prompt');
+});
+
+test('iterate turn (App.tsx exists): no pm, no plan_ready, straight to eng', async () => {
+  const sandbox = new FakeSandbox();
+  const model = new FakeModel({
+    pm: planTurn(['src/App.tsx']),
+    // turn 1 writes the app; turn 2 modifies it
+    eng: [writeTurn({ 'src/App.tsx': 'v1' }), done, writeTurn({ 'src/App.tsx': 'v2' }), done],
+  });
+  const orchestrator = createOrchestrator({ sandbox, model, credits: new FakeCredits() });
+
+  await collect(orchestrator.run('ws', '做一个应用'));
+  const pmCallsAfterFirst = model.calls.filter((c) => c.agentHandle === 'pm').length;
+
+  const events = await collect(orchestrator.run('ws', '改成三列'));
+
+  assert.ok(!events.some((e) => e.type === 'plan_ready'), 'no plan on iterate turn');
+  assert.equal(
+    model.calls.filter((c) => c.agentHandle === 'pm').length,
+    pmCallsAfterFirst,
+    'pm not called again on the iterate turn',
+  );
+  assert.ok(events.some((e) => e.type === 'tool_call_start'), 'eng writes directly');
+});
+
+test('pm turn without a plan_files call falls through to eng (model variance tolerance)', async () => {
+  const sandbox = new FakeSandbox();
+  const orchestrator = makeOrchestrator(sandbox, {
+    pm: [[{ type: 'text', delta: 'no plan from me' }], [{ type: 'text', delta: 'ok' }]],
+    eng: [writeTurn({ 'src/App.tsx': 'a' }), done],
+  });
+
+  const events = await collect(orchestrator.run('s-noplan', 'go'));
+
+  assert.ok(!events.some((e) => e.type === 'plan_ready'));
+  assert.ok(events.some((e) => e.type === 'tool_result'), 'eng still wrote');
+});
+
+test('concurrent runs on one session serialize: pm plans exactly once', async () => {
+  const sandbox = new FakeSandbox();
+  const model = new FakeModel({
+    pm: planTurn(['src/App.tsx']),
+    // run1 eng: write; run2 eng: write again (iterate semantics)
+    eng: [writeTurn({ 'src/App.tsx': 'v1' }), done, writeTurn({ 'src/App.tsx': 'v2' }), done],
+  });
+  const orchestrator = createOrchestrator({ sandbox, model, credits: new FakeCredits() });
+
+  // Fire both without awaiting the first — the per-session queue must put
+  // run2 behind run1's tail rather than racing appExists into double-planning.
+  const p1 = collect(orchestrator.run('s-race', 'first'));
+  const p2 = collect(orchestrator.run('s-race', 'second'));
+  const [events1, events2] = await Promise.all([p1, p2]);
+
+  const planCalls = [...events1, ...events2].filter(
+    (e) => e.type === 'tool_call_start' && e.toolName === 'plan_files',
+  ).length;
+  assert.equal(planCalls, 1, 'only the first run plans');
+  assert.ok(events2.some((e) => e.type === 'tool_result'), 'second run still wrote');
+  assert.ok(!events2.some((e) => e.type === 'plan_ready'), 'second run is an iterate turn');
 });

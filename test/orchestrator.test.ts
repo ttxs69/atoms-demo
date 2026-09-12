@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { createOrchestrator } from '../src/orchestrator/orchestrator.ts';
 import { FakeSandbox } from './fakes/fake-sandbox.ts';
 import { FakeModel } from './fakes/fake-model.ts';
+import { planTurn } from './fakes/plan-turn.ts';
 import { FakeCredits } from './fakes/fake-credits.ts';
 import type { StreamEvent } from '../src/domain/events.ts';
 
@@ -16,15 +17,25 @@ async function collect(stream: AsyncIterable<StreamEvent>) {
 test('run() streams agent_started then text_delta then agent_done', async () => {
   const orchestrator = createOrchestrator({
     sandbox: new FakeSandbox(),
-    model: new FakeModel({ eng: [[{ type: 'text', delta: 'Got it.' }]] }),
+    model: new FakeModel({
+      pm: [[{ type: 'text', delta: 'Planning.' }]],
+      eng: [[{ type: 'text', delta: 'Got it.' }]],
+    }),
     credits: new FakeCredits(),
   });
 
   const events = await collect(orchestrator.run('session-1', 'make a hello page'));
 
   assert.deepEqual(
-    events.map((event) => event.type),
-    ['agent_started', 'text_delta', 'agent_done'],
+    events.map((event) => `${event.type}:${'agentHandle' in event ? event.agentHandle : ''}`),
+    [
+      'agent_started:pm',
+      'text_delta:pm',
+      'agent_done:pm',
+      'agent_started:eng',
+      'text_delta:eng',
+      'agent_done:eng',
+    ],
   );
 });
 
@@ -33,6 +44,7 @@ test('run() executes write_file so the file actually lands in the sandbox', asyn
   const orchestrator = createOrchestrator({
     sandbox,
     model: new FakeModel({
+      pm: planTurn(['a.txt']),
       eng: [
         [
           { type: 'tool_call_start', toolCallId: 't1', toolName: 'write_file' },
@@ -59,6 +71,7 @@ test('run() emits tool events around a write_file call', async () => {
   const orchestrator = createOrchestrator({
     sandbox: new FakeSandbox(),
     model: new FakeModel({
+      pm: planTurn(['a.txt']),
       eng: [
         [
           { type: 'tool_call_start', toolCallId: 't1', toolName: 'write_file' },
@@ -76,11 +89,22 @@ test('run() emits tool events around a write_file call', async () => {
   assert.deepEqual(
     events.map((event) => event.type),
     [
+      // pm: narrate, call plan_files, close
+      'agent_started',
+      'text_delta',
+      'tool_call_start',
+      'tool_input_delta',
+      'tool_result',
+      'text_delta', // pm's closing step
+      'agent_done',
+      // plan lands between the two agents
+      'plan_ready',
+      // eng: write, close, pipeline
       'agent_started',
       'tool_call_start',
       'tool_input_delta',
       'tool_result',
-      'text_delta', // the closing text step ends the loop
+      'text_delta',
       'run_step', // installing
       'run_step', // building
       'run_step', // starting
@@ -95,6 +119,9 @@ test('run() reuses one sandbox across turns in the same session', async () => {
   const orchestrator = createOrchestrator({
     sandbox,
     model: new FakeModel({
+      // eng writes nothing, so App.tsx never exists and both turns are
+      // 'first turns' — two pm plans cover that honestly.
+      pm: [...planTurn(['a.txt']), ...planTurn(['b.txt'])],
       eng: [[{ type: 'text', delta: 'one' }], [{ type: 'text', delta: 'two' }]],
     }),
     credits: new FakeCredits(),
@@ -110,6 +137,7 @@ test('run() emits an error event when tool arguments are malformed', async () =>
   const orchestrator = createOrchestrator({
     sandbox: new FakeSandbox(),
     model: new FakeModel({
+      pm: planTurn(['a.txt']),
       eng: [
         [
           { type: 'tool_call_start', toolCallId: 't1', toolName: 'write_file' },
@@ -131,7 +159,10 @@ test('run() produces the same event sequence on repeated calls with the same scr
   function makeOrchestrator() {
     return createOrchestrator({
       sandbox: new FakeSandbox(),
-      model: new FakeModel({ eng: [[{ type: 'text', delta: 'Hello.' }]] }),
+      model: new FakeModel({
+        pm: planTurn(['a.txt']),
+        eng: [[{ type: 'text', delta: 'Hello.' }]],
+      }),
       credits: new FakeCredits(),
     });
   }

@@ -41,13 +41,31 @@ const WRITE_FILE_TOOL = {
   }),
 };
 
+const PLAN_FILES_TOOL = {
+  description:
+    'Submit the implementation plan: every file the engineer must write.',
+  inputSchema: z.object({
+    files: z
+      .array(z.string())
+      .describe('File paths Alex must write, e.g. ["src/App.tsx", "src/components/MoodCard.tsx"]'),
+    description: z.string().describe('One-paragraph summary of what the app does'),
+  }),
+};
+
 /**
  * System instructions per role. Intentionally terse — Mike's dispatch and
  * Emma's planning arrive with ticket 04, and richer prompts belong there.
  */
 const ROLE_INSTRUCTIONS: Record<AgentHandle, string> = {
   lead: `You are Mike, a senior technical lead. Understand what the user wants to build and respond concisely.`,
-  pm: `You are Emma, a product manager. Break down the user's request into a clear file list and description that Alex can build from.`,
+  pm: `You are Emma, a product manager. Turn the user's request into an implementation plan.
+
+Always finish with ONE plan_files call listing EVERY file Alex must write:
+- src/App.tsx first (it is required)
+- then components/hooks the app needs, each under src/
+- 3-6 files total for a small app; split big UIs into components
+The scaffold (package.json, vite config, index.html, src/main.tsx, src/index.css) already exists — NEVER list it.
+Keep the description one paragraph, in the user's language.`,
   eng: `You are Alex, a full-stack engineer. Build the user's app.
 
 The project scaffold ALREADY EXISTS in the workspace: package.json, vite.config.ts (React + Tailwind v4), tsconfig.json, index.html, src/main.tsx (renders <App/>), src/index.css (@import "tailwindcss"). NEVER rewrite these.
@@ -106,12 +124,25 @@ class LlmModelAdapter implements ModelPort {
     // The tool whitelist is part of the role's configuration: only `eng` may
     // write files. Branching keeps the call shape honest instead of passing
     // an empty tool set that would read as "no tools available".
+    // The tool whitelist is part of the role's configuration: only `eng` may
+    // write files, only `pm` submits plans. Branching keeps the call shape
+    // honest instead of passing an empty tool set that would read as "no
+    // tools available".
+    const toolsFor = (handle: AgentHandle) =>
+      handle === 'eng'
+        ? { write_file: WRITE_FILE_TOOL }
+        : handle === 'pm'
+          ? { plan_files: PLAN_FILES_TOOL }
+          : undefined;
+
+    const handle = agentHandle;
+    const tools = toolsFor(handle);
     // One controlled cast: the SDK's overloads don't align with
-    // exactOptionalPropertyTypes, and the branch above is what keeps the
-    // tool whitelist honest.
+    // exactOptionalPropertyTypes, and the whitelist above is what keeps
+    // tool access honest.
     const result = streamText({
       ...shared,
-      ...(agentHandle === 'eng' ? { tools: { write_file: WRITE_FILE_TOOL } } : {}),
+      ...(tools ? { tools } : {}),
     } as Parameters<typeof streamText>[0]);
 
     for await (const part of result.fullStream) {

@@ -5,12 +5,12 @@ import { AGENT_NAMES, AGENT_ROLE_LABELS, type AgentHandle } from '../domain/role
 import type { StreamEvent } from '../domain/events.ts';
 import { decodeEvents } from '../transport/sse.ts';
 
-/** One file Alex touched during a turn. */
+/** One file in the workspace tree: planned (gray), writing, or done. */
 interface FileEntry {
   toolCallId: string;
   path: string | null;
   bytes: number | null;
-  state: 'writing' | 'done';
+  state: 'planned' | 'writing' | 'done';
 }
 
 /** One pipeline step the orchestrator ran (install / build / start). */
@@ -53,6 +53,15 @@ function extractPath(argsSoFar: string): string | null {
   }
 }
 
+/** "4 个文件 · 已完成 1 · 正在写第 2 个" — real progress, not a fake bar. */
+function progressText(files: FileEntry[]): string {
+  const done = files.filter((f) => f.state === 'done').length;
+  const writingIndex = files.findIndex((f) => f.state === 'writing');
+  const writing =
+    writingIndex === -1 ? '' : ` · 正在写第 ${writingIndex + 1} 个`;
+  return `${files.length} 个文件 · 已完成 ${done}${writing}`;
+}
+
 export function Workspace() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [log, setLog] = useState<string[]>([]);
@@ -61,6 +70,10 @@ export function Workspace() {
   const [fatal, setFatal] = useState<string | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [device, setDevice] = useState<'desktop' | 'tablet' | 'mobile'>('desktop');
+  // The workspace file tree — skeleton-first: filled by plan_ready, then each
+  // row moves planned → writing → done as Alex works. Keyed by path so plan
+  // rows and write events meet regardless of message boundaries.
+  const [planFiles, setPlanFiles] = useState<FileEntry[]>([]);
 
   // One session for the lifetime of the tab. Persisting it is ticket 07's job.
   const sessionIdRef = useRef<string>(`s-${Date.now()}`);
@@ -79,8 +92,52 @@ export function Workspace() {
       const buffered =
         (toolArgsRef.current.get(event.toolCallId) ?? '') + event.argsDelta;
       toolArgsRef.current.set(event.toolCallId, buffered);
+      // Skeleton-first: name the row the moment the path parses out of the
+      // streaming args, and mark it writing.
+      const path = extractPath(buffered);
+      if (path) {
+        setPlanFiles((prev) => {
+          const known = prev.some((f) => f.path === path);
+          return known
+            ? prev.map((f) => (f.path === path ? { ...f, state: 'writing' } : f))
+            : [
+                ...prev,
+                {
+                  toolCallId: event.toolCallId,
+                  path,
+                  bytes: null,
+                  state: 'writing' as const,
+                },
+              ];
+        });
+      }
     } else if (event.type === 'run_step' && event.step === 'preview_ready' && event.url) {
       setPreviewUrl(event.url);
+    } else if (event.type === 'plan_ready') {
+      // Dedupe by path: a duplicated path in the plan would otherwise
+      // inflate the denominator and render two rows that both flip.
+      const seen = new Set<string>();
+      setPlanFiles(
+        event.files
+          .filter((path) => (seen.has(path) ? false : seen.add(path)))
+          .map((path, i) => ({
+            toolCallId: `plan-${i}`,
+            path,
+            bytes: null,
+            state: 'planned' as const,
+          })),
+      );
+    } else if (event.type === 'tool_result') {
+      const result = event.result as { path?: string; bytes?: number } | null;
+      if (result?.path) {
+        setPlanFiles((prev) =>
+          prev.map((f) =>
+            f.path === result.path
+              ? { ...f, state: 'done', bytes: result.bytes ?? f.bytes }
+              : f,
+          ),
+        );
+      }
     }
 
     setMessages((prev) => {
@@ -190,6 +247,9 @@ export function Workspace() {
 
     setInput('');
     setFatal(null);
+    // Each turn gets a fresh tree: turn-1 rows must not bleed into turn-2's
+    // progress (iterate turns build their rows from writes alone).
+    setPlanFiles([]);
     setStreaming(true);
     setMessages((prev) => [
       ...prev,
@@ -301,6 +361,22 @@ export function Workspace() {
                 </div>
               ),
             )}
+
+            {planFiles.length > 0 ? (
+              <div className="files-card">
+                <div className="files-header">{progressText(planFiles)}</div>
+                {planFiles.map((file) => (
+                  <div className={`file-line ${file.state}`} key={file.toolCallId}>
+                    <span className="status">
+                      {file.state === 'done' ? '✓' : file.state === 'writing' ? '▶' : '·'}
+                    </span>
+                    <span>{file.path}</span>
+                    {file.bytes !== null ? <span className="size">{file.bytes}B</span> : null}
+                    {file.state === 'planned' ? <span className="size">待生成</span> : null}
+                  </div>
+                ))}
+              </div>
+            ) : null}
 
             {log.length > 0 ? (
               <details className="activity">

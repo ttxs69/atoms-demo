@@ -71,6 +71,22 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
    */
   const sandboxBySession = new Map<string, string>();
 
+  /**
+   * Sessions that already planned once, in this process. Guards against a
+   * transient sandbox error mid-iterate misreading "cannot read" as "no app"
+   * and re-planning over a finished tree. App.tsx existence remains the
+   * persistent signal across process restarts; this set is the fast, robust
+   * one within a process.
+   */
+  const plannedSessions = new Set<string>();
+
+  /**
+   * Single writer per session (spec: 工作区写入是单写者). Concurrent run()s —
+   * double submit, second tab, direct API — queue behind each other instead
+   * of racing appExists and double-writing the sandbox.
+   */
+  const runQueue = new Map<string, Promise<unknown>>();
+
   async function sandboxFor(sessionId: string): Promise<string> {
     const existing = sandboxBySession.get(sessionId);
     if (existing !== undefined) return existing;
@@ -115,6 +131,49 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     const { path, content } = parseWriteFileArgs(rawArgs);
     await deps.sandbox.writeFile(sandboxId, path, content);
     return { ok: true, path, bytes: content.length };
+  }
+
+/** Emma's plan: the file list that drives skeleton-first. */
+interface Plan {
+  files: string[];
+  description: string;
+}
+
+function parsePlanArgs(raw: string): Plan {
+  const parsed = JSON.parse(raw) as { files?: unknown; description?: unknown };
+  if (
+    typeof parsed !== 'object' ||
+    parsed === null ||
+    !Array.isArray(parsed.files) ||
+    parsed.files.length === 0 ||
+    !parsed.files.every((f) => typeof f === 'string') ||
+    typeof parsed.description !== 'string'
+  ) {
+    throw new Error(
+      'plan_files expects { files: string[] (non-empty), description: string }',
+    );
+  }
+  return { files: parsed.files as string[], description: parsed.description };
+}
+
+/**
+ * First turn = no app in the sandbox yet. src/App.tsx is the scaffold's one
+ * required model-written file, so its absence is the reliable signal — and it
+ * survives process restarts, unlike an in-memory flag.
+ */
+  /**
+   * First turn = no app in the sandbox yet. src/App.tsx is the scaffold's one
+   * required model-written file, so its absence is the reliable signal — and
+   * it survives process restarts, unlike an in-memory flag.
+   */
+  async function appExists(sessionId: string, sandboxId: string): Promise<boolean> {
+    if (plannedSessions.has(sessionId)) return true;
+    try {
+      await deps.sandbox.readFile(sandboxId, 'src/App.tsx');
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   /** Install and build can each take a minute on a cold cache. */
@@ -194,122 +253,193 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     }
   }
 
-  return {
-    async *run(sessionId: string, userInput: string): AsyncIterable<StreamEvent> {
-      // Alex owns the turn: he is the only role with write access. Mike's
-      // dispatch to Emma arrives with skeleton-first planning in a later ticket.
-      const agentHandle: AgentHandle = 'eng';
-      const messageId = `msg-${++messageCounter}`;
+  /**
+   * The generation loop for one agent. Models emit a batch of tool calls and
+   * stop, expecting the results before continuing — a single stream call
+   * yields one step, not an app. So: run a step, execute its tools, feed the
+   * calls and results back as messages, repeat until a step produces no tool
+   * calls. Bounded so a confused model cannot loop forever.
+   *
+   * The caller owns agent_started/agent_done and the pipeline; this owns the
+   * steps between them. Returns what the agent accomplished so the caller can
+   * dispatch on it (a captured plan, files written).
+   */
+  async function* runAgentSteps(
+    agentHandle: AgentHandle,
+    conversation: (ModelMessage | StepMessage)[],
+    sandboxId: string,
+  ): AsyncGenerator<StreamEvent, { filesWritten: number; plan: Plan | null }> {
+    const MAX_STEPS = 10;
+    let plan: Plan | null = null;
+    let filesWritten = 0;
+    // Tool arguments arrive as fragments. Buffer them per call id until the
+    // model signals the call is complete, then parse and execute once.
+    const openCalls = new Map<string, { toolName: string; args: string }>();
 
-      yield { type: 'agent_started', agentHandle, messageId };
+    for (let step = 0; step < MAX_STEPS; step += 1) {
+      const stepCalls: ToolCallPart[] = [];
+      const stepResults: ToolResultPart[] = [];
 
-      const sandboxId = await sandboxFor(sessionId);
-      await ensureScaffold(sandboxId);
-
-      /**
-       * The generation loop. Models emit a batch of tool calls and stop,
-       * expecting the results before continuing — a single stream call yields
-       * one step, not a whole app. So: run a step, execute its tools, feed the
-       * calls and results back as messages, repeat until a step produces no
-       * tool calls. Bounded so a confused model cannot loop forever.
-       */
-      const MAX_STEPS = 10;
-      const conversation: (ModelMessage | StepMessage)[] = [
-        { role: 'user', content: userInput },
-      ];
-
-      // Tool arguments arrive as fragments. Buffer them per call id until the
-      // model signals the call is complete, then parse and execute once.
-      const openCalls = new Map<string, { toolName: string; args: string }>();
-      let filesWritten = 0;
-
-      for (let step = 0; step < MAX_STEPS; step += 1) {
-        const stepCalls: ToolCallPart[] = [];
-        const stepResults: ToolResultPart[] = [];
-
-        for await (const chunk of deps.model.stream(agentHandle, conversation)) {
-          switch (chunk.type) {
-            case 'text': {
-              yield { type: 'text_delta', agentHandle, delta: chunk.delta };
-              break;
-            }
-
-            case 'tool_call_start': {
-              openCalls.set(chunk.toolCallId, { toolName: chunk.toolName, args: '' });
-              yield {
-                type: 'tool_call_start',
-                agentHandle,
-                toolCallId: chunk.toolCallId,
-                toolName: chunk.toolName,
-              };
-              break;
-            }
-
-            case 'tool_input_delta': {
-              const call = openCalls.get(chunk.toolCallId);
-              if (call) call.args += chunk.argsDelta;
-              yield {
-                type: 'tool_input_delta',
-                agentHandle,
-                toolCallId: chunk.toolCallId,
-                argsDelta: chunk.argsDelta,
-              };
-              break;
-            }
-
-            case 'tool_call_end': {
-              const call = openCalls.get(chunk.toolCallId);
-              openCalls.delete(chunk.toolCallId);
-              if (!call) break;
-
-              try {
-                const result = await executeTool(call.toolName, call.args, sandboxId);
-                filesWritten += 1;
-                yield {
-                  type: 'tool_result',
-                  agentHandle,
-                  toolCallId: chunk.toolCallId,
-                  result,
-                };
-                stepCalls.push({
-                  type: 'tool-call',
-                  toolCallId: chunk.toolCallId,
-                  toolName: call.toolName,
-                  input: JSON.parse(call.args) as unknown,
-                });
-                stepResults.push({
-                  type: 'tool-result',
-                  toolCallId: chunk.toolCallId,
-                  toolName: call.toolName,
-                  output: { type: 'text', value: JSON.stringify(result) },
-                });
-              } catch (error) {
-                yield {
-                  type: 'error',
-                  agentHandle,
-                  message: error instanceof Error ? error.message : String(error),
-                };
-              }
-              break;
-            }
+      for await (const chunk of deps.model.stream(agentHandle, conversation)) {
+        switch (chunk.type) {
+          case 'text': {
+            yield { type: 'text_delta', agentHandle, delta: chunk.delta };
+            break;
           }
-        }
 
-        if (stepCalls.length === 0) break; // model finished the turn
+          case 'tool_call_start': {
+            openCalls.set(chunk.toolCallId, { toolName: chunk.toolName, args: '' });
+            yield {
+              type: 'tool_call_start',
+              agentHandle,
+              toolCallId: chunk.toolCallId,
+              toolName: chunk.toolName,
+            };
+            break;
+          }
 
-        conversation.push({ role: 'assistant', content: stepCalls });
-        conversation.push({ role: 'tool', content: stepResults });
+          case 'tool_input_delta': {
+            const call = openCalls.get(chunk.toolCallId);
+            if (call) call.args += chunk.argsDelta;
+            yield {
+              type: 'tool_input_delta',
+              agentHandle,
+              toolCallId: chunk.toolCallId,
+              argsDelta: chunk.argsDelta,
+            };
+            break;
+          }
 
-        if (step === MAX_STEPS - 1 && stepCalls.length > 0) {
-          yield {
-            type: 'error',
-            agentHandle,
-            message: `generation stopped at the ${MAX_STEPS}-step limit; the app may be incomplete`,
-          };
+          case 'tool_call_end': {
+            const call = openCalls.get(chunk.toolCallId);
+            openCalls.delete(chunk.toolCallId);
+            if (!call) break;
+
+            try {
+              const isPlan = call.toolName === 'plan_files';
+              let result: unknown;
+              if (isPlan) {
+                plan = parsePlanArgs(call.args);
+                result = { ok: true, files: plan.files.length };
+              } else if (agentHandle !== 'eng') {
+                // Only Alex writes. A hallucinated write_file from another
+                // role is refused rather than executed.
+                throw new Error(`agent "${agentHandle}" may not call ${call.toolName}`);
+              } else {
+                result = await executeTool(call.toolName, call.args, sandboxId);
+                filesWritten += 1;
+              }
+
+              yield {
+                type: 'tool_result',
+                agentHandle,
+                toolCallId: chunk.toolCallId,
+                result,
+              };
+              stepCalls.push({
+                type: 'tool-call',
+                toolCallId: chunk.toolCallId,
+                toolName: call.toolName,
+                input: JSON.parse(call.args) as unknown,
+              });
+              stepResults.push({
+                type: 'tool-result',
+                toolCallId: chunk.toolCallId,
+                toolName: call.toolName,
+                output: { type: 'text', value: JSON.stringify(result) },
+              });
+            } catch (error) {
+              yield {
+                type: 'error',
+                agentHandle,
+                message: error instanceof Error ? error.message : String(error),
+              };
+            }
+            break;
+          }
         }
       }
 
-      if (filesWritten > 0) {
+      if (stepCalls.length === 0) break; // model finished the turn
+
+      conversation.push({ role: 'assistant', content: stepCalls });
+      conversation.push({ role: 'tool', content: stepResults });
+
+      if (step === MAX_STEPS - 1 && stepCalls.length > 0) {
+        yield {
+          type: 'error',
+          agentHandle,
+          message: `generation stopped at the ${MAX_STEPS}-step limit; the app may be incomplete`,
+        };
+      }
+    }
+
+    return { filesWritten, plan };
+  }
+
+  const api = {
+    async *run(sessionId: string, userInput: string): AsyncIterable<StreamEvent> {
+      // Serialize per session: the previous run's tail (pipeline, pause)
+      // completes before this one starts, keeping one writer on the sandbox.
+      // Entries are never deleted — each holds one resolved promise per
+      // session, which is negligible for this deployment's session counts.
+      const previous = runQueue.get(sessionId) ?? Promise.resolve();
+      let release!: () => void;
+      const done = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      runQueue.set(sessionId, previous.then(() => done));
+      await previous;
+
+      try {
+        yield* api.runSerialized(sessionId, userInput);
+      } finally {
+        release();
+      }
+    },
+
+    async *runSerialized(sessionId: string, userInput: string): AsyncIterable<StreamEvent> {
+      const sandboxId = await sandboxFor(sessionId);
+      await ensureScaffold(sandboxId);
+      const isFirstTurn = !(await appExists(sessionId, sandboxId));
+      if (isFirstTurn) plannedSessions.add(sessionId);
+
+      // ── First turn: Emma plans, then Alex builds from her plan. ────────
+      // The plan drives skeleton-first: the tree appears as placeholders the
+      // moment Emma's list lands, giving the wait a shape before any code.
+      // On iterate turns (the app exists) planning is skipped entirely —
+      // modification scope is small and the preview is already visible.
+      let engPrompt = userInput;
+      if (isFirstTurn) {
+        yield { type: 'agent_started', agentHandle: 'pm', messageId: `msg-${++messageCounter}` };
+        const pmResult = yield* runAgentSteps(
+          'pm',
+          [{ role: 'user', content: userInput }],
+          sandboxId,
+        );
+        yield { type: 'agent_done', agentHandle: 'pm', creditsUsed: 0 };
+
+        if (pmResult.plan) {
+          yield { type: 'plan_ready', files: pmResult.plan.files };
+          engPrompt = [
+            `User request: ${userInput}`,
+            '',
+            `Emma's plan — description: ${pmResult.plan.description}`,
+            'Files to write (write EVERY one):',
+            ...pmResult.plan.files.map((f) => `- ${f}`),
+          ].join('\n');
+        }
+      }
+
+      // ── Alex builds. ──────────────────────────────────────────────────
+      yield { type: 'agent_started', agentHandle: 'eng', messageId: `msg-${++messageCounter}` };
+      const engResult = yield* runAgentSteps(
+        'eng',
+        [{ role: 'user', content: engPrompt }],
+        sandboxId,
+      );
+
+      if (engResult.filesWritten > 0) {
         try {
           for await (const stepEvent of runPipeline(sandboxId)) {
             yield stepEvent;
@@ -317,13 +447,15 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         } catch (error) {
           yield {
             type: 'error',
-            agentHandle,
+            agentHandle: 'eng',
             message: error instanceof Error ? error.message : String(error),
           };
         }
       }
 
-      yield { type: 'agent_done', agentHandle, creditsUsed: 0 };
+      yield { type: 'agent_done', agentHandle: 'eng', creditsUsed: 0 };
     },
   };
+
+  return api;
 }
