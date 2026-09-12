@@ -1,6 +1,6 @@
 import { createOrchestrator } from '../../../orchestrator/orchestrator.ts';
 import { E2BSandboxAdapter } from '../../../ports/e2b-sandbox-adapter.ts';
-import { AnthropicModelAdapter } from '../../../ports/anthropic-model-adapter.ts';
+import { createModelAdapter } from '../../../ports/llm-model-adapter.ts';
 import { encodeEvent } from '../../../transport/sse.ts';
 import type { CreditsPort } from '../../../ports/credits-port.ts';
 
@@ -26,24 +26,24 @@ const MAX_MESSAGE_LENGTH = 4000;
  * The orchestrator is a module-level singleton so `sandboxBySession` (inside
  * `createOrchestrator`) survives across HTTP requests in the same process.
  *
- * We read env vars here, at module initialization. If they are missing the
- * first POST will return 503, but the orchestrator object still exists as a
- * shell — the adapters never call E2B/Anthropic unless a request arrives.
- *
- * This is sufficient for Railway's single long-running process (ticket 14).
- * A real deployment will eventually persist sandbox ids in Postgres
- * alongside the session row (ticket 08) so restarts do not lose state.
+ * The LLM provider is env-driven: any OpenAI-compatible or Anthropic-protocol
+ * endpoint works (deepseek / glm / minimax all covered). See llm-model-adapter.
  */
 const orchestrator = createOrchestrator({
   sandbox: new E2BSandboxAdapter(process.env['E2B_API_KEY'] ?? ''),
-  model: new AnthropicModelAdapter(process.env['ANTHROPIC_API_KEY'] ?? ''),
+  model: createModelAdapter({
+    protocol: process.env['LLM_PROTOCOL'] === 'anthropic' ? 'anthropic' : 'openai',
+    baseUrl: process.env['LLM_BASE_URL'] ?? 'https://api.deepseek.com/v1',
+    apiKey: process.env['LLM_API_KEY'] ?? '',
+    model: process.env['LLM_MODEL'] ?? 'deepseek-chat',
+  }),
   credits: UNMETERED_CREDITS,
 });
 
 export async function POST(request: Request): Promise<Response> {
-  if (!process.env['E2B_API_KEY'] || !process.env['ANTHROPIC_API_KEY']) {
+  if (!process.env['E2B_API_KEY'] || !process.env['LLM_API_KEY']) {
     return Response.json(
-      { error: 'Server is missing E2B_API_KEY or ANTHROPIC_API_KEY.' },
+      { error: 'Server is missing E2B_API_KEY or LLM_API_KEY.' },
       { status: 503 },
     );
   }

@@ -20,7 +20,8 @@
     "typescript": "5.9.2"
   },
   "dependencies": {
-    "@ai-sdk/anthropic": "^2.0.102",
+    "@ai-sdk/anthropic": "^4.0.53",
+    "@ai-sdk/openai-compatible": "^3.0.48",
     "ai": "^7.0.99",
     "e2b": "^2.49.1",
     "next": "^15.3.5",
