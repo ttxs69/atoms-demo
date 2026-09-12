@@ -208,13 +208,89 @@ function parsePlanArgs(raw: string): Plan {
    */
   async function* runPipeline(
     sandboxId: string,
+    pathsWritten: Set<string>,
   ): AsyncGenerator<StreamEvent> {
     try {
       yield { type: 'run_step', step: 'installing' };
       await runCommandOrFail(sandboxId, 'npm install --no-audit --no-fund', 'npm install');
 
-      yield { type: 'run_step', step: 'building' };
-      await runCommandOrFail(sandboxId, 'npm run build', 'build');
+      // Bounded self-repair: a build failure is a technical problem, so the
+      // orchestrator feeds the raw error back to Alex and rebuilds. The
+      // promise is at most THREE REPAIR ROUNDS (so four builds in total) —
+      // what the user sees ("自己修（第 N 次）") is the contract. Exhausting
+      // the rounds is terminal (gave_up) with a next-step suggestion, never
+      // an infinite spinner. Contrast gate failures (ticket 11): those never
+      // auto-retry.
+      const MAX_REPAIR_ROUNDS = 3;
+      let buildError: string | null = null;
+      let gaveUp = false;
+      for (let round = 1; round <= MAX_REPAIR_ROUNDS + 1; round += 1) {
+        yield { type: 'run_step', step: 'building' };
+        try {
+          await runCommandOrFail(sandboxId, 'npm run build', 'build');
+          buildError = null;
+          break;
+        } catch (error) {
+          buildError = error instanceof Error ? error.message : String(error);
+
+          if (round > MAX_REPAIR_ROUNDS) {
+            gaveUp = true;
+            break;
+          }
+
+          yield {
+            type: 'run_step',
+            step: 'autofixing',
+            attempt: round,
+            error: buildError,
+          };
+          yield {
+            type: 'agent_started',
+            agentHandle: 'eng',
+            messageId: `msg-${++messageCounter}`,
+          };
+          const fix = yield* runAgentSteps(
+            'eng',
+            [
+              {
+                role: 'user',
+                content: [
+                  'npm run build failed with this output:',
+                  '',
+                  buildError,
+                  '',
+                  'Fix the code so the build passes.',
+                  "Reply rules: your FIRST sentence must be one short plain-language line (in the user's language, 中文 if they wrote Chinese) saying what went wrong — the user reads it while you work. Then fix it with write_file: write ONLY the files that need changes. The project scaffold must not be modified.",
+                  pathsWritten.size > 0
+                    ? `Files in the project: ${[...pathsWritten].join(', ')}`
+                    : '',
+                ]
+                  .filter((line) => line !== '')
+                  .join('\n'),
+              },
+            ],
+            sandboxId,
+          );
+          yield { type: 'agent_done', agentHandle: 'eng', creditsUsed: 0 };
+
+          if (fix.filesWritten === 0) {
+            // A repair round that changed nothing cannot fix the build —
+            // rebuilding identical code is pure waste. Give up now.
+            gaveUp = true;
+            break;
+          }
+        }
+      }
+      if (gaveUp && buildError !== null) {
+        yield {
+          type: 'error',
+          agentHandle: 'eng',
+          message:
+            `构建失败，Alex 已尝试自动修复但未能通过。已写入的文件都保留了。` +
+            `下一步建议：换一个更简单的描述重新生成，或换个说法再试一次。`,
+        };
+        return;
+      }
 
       yield { type: 'run_step', step: 'starting' };
       await deps.sandbox.runBackground(
@@ -268,10 +344,14 @@ function parsePlanArgs(raw: string): Plan {
     agentHandle: AgentHandle,
     conversation: (ModelMessage | StepMessage)[],
     sandboxId: string,
-  ): AsyncGenerator<StreamEvent, { filesWritten: number; plan: Plan | null }> {
+  ): AsyncGenerator<
+    StreamEvent,
+    { filesWritten: number; plan: Plan | null; paths: string[] }
+  > {
     const MAX_STEPS = 10;
     let plan: Plan | null = null;
     let filesWritten = 0;
+    const paths: string[] = [];
     // Tool arguments arrive as fragments. Buffer them per call id until the
     // model signals the call is complete, then parse and execute once.
     const openCalls = new Map<string, { toolName: string; args: string }>();
@@ -328,6 +408,7 @@ function parsePlanArgs(raw: string): Plan {
               } else {
                 result = await executeTool(call.toolName, call.args, sandboxId);
                 filesWritten += 1;
+                paths.push((result as { path: string }).path);
               }
 
               yield {
@@ -374,7 +455,7 @@ function parsePlanArgs(raw: string): Plan {
       }
     }
 
-    return { filesWritten, plan };
+    return { filesWritten, plan, paths };
   }
 
   const api = {
@@ -400,6 +481,8 @@ function parsePlanArgs(raw: string): Plan {
 
     async *runSerialized(sessionId: string, userInput: string): AsyncIterable<StreamEvent> {
       const sandboxId = await sandboxFor(sessionId);
+      // Written this turn — feeds the fix turns so Alex knows the project.
+      const pathsWritten = new Set<string>();
       await ensureScaffold(sandboxId);
       const isFirstTurn = !(await appExists(sessionId, sandboxId));
       if (isFirstTurn) plannedSessions.add(sessionId);
@@ -441,7 +524,8 @@ function parsePlanArgs(raw: string): Plan {
 
       if (engResult.filesWritten > 0) {
         try {
-          for await (const stepEvent of runPipeline(sandboxId)) {
+          for (const path of engResult.paths) pathsWritten.add(path);
+          for await (const stepEvent of runPipeline(sandboxId, pathsWritten)) {
             yield stepEvent;
           }
         } catch (error) {

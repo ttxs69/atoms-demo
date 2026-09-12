@@ -13,10 +13,12 @@ interface FileEntry {
   state: 'planned' | 'writing' | 'done';
 }
 
-/** One pipeline step the orchestrator ran (install / build / start). */
+/** One pipeline step the orchestrator ran (install / build / start / fix). */
 interface StepEntry {
   step: string;
   url?: string;
+  attempt?: number;
+  error?: string;
 }
 
 /** One assistant turn, assembled from the event stream. */
@@ -217,10 +219,12 @@ export function Workspace() {
         }
 
         case 'run_step': {
-          const entry: StepEntry =
-            event.url !== undefined
-              ? { step: event.step, url: event.url }
-              : { step: event.step };
+          const entry: StepEntry = {
+            step: event.step,
+            ...(event.url !== undefined ? { url: event.url } : {}),
+            ...(event.attempt !== undefined ? { attempt: event.attempt } : {}),
+            ...(event.error !== undefined ? { error: event.error } : {}),
+          };
           return updateLast((message) => ({
             ...message,
             steps: [...message.steps, entry],
@@ -341,17 +345,34 @@ export function Workspace() {
                     </div>
                   ))}
 
-                  {message.steps.map((step, index) => (
-                    <div className={`file-line ${step.step === 'preview_ready' ? 'done' : 'writing'}`} key={`${message.messageId}-s${index}`}>
-                      <span className="status">{step.step === 'preview_ready' ? '✓' : '▶'}</span>
-                      <span>
-                        {step.step === 'installing' && '安装依赖 npm install'}
-                        {step.step === 'building' && '构建 npm run build'}
-                        {step.step === 'starting' && '启动开发服务器'}
-                        {step.step === 'preview_ready' && '预览就绪'}
-                      </span>
-                    </div>
-                  ))}
+                  {message.steps.map((step, index) =>
+                    step.step === 'autofixing' ? (
+                      <div className="fix-note" key={`${message.messageId}-s${index}`}>
+                        <div className="fix-head">
+                          ⚠ 出了点问题，Alex 正在自己修（第 {step.attempt} 次）
+                        </div>
+                        {step.error ? (
+                          <details className="fix-detail">
+                            <summary>查看详情</summary>
+                            <pre>{step.error}</pre>
+                          </details>
+                        ) : null}
+                      </div>
+                    ) : (
+                      <div
+                        className={`file-line ${step.step === 'preview_ready' ? 'done' : 'writing'}`}
+                        key={`${message.messageId}-s${index}`}
+                      >
+                        <span className="status">{step.step === 'preview_ready' ? '✓' : '▶'}</span>
+                        <span>
+                          {step.step === 'installing' && '安装依赖 npm install'}
+                          {step.step === 'building' && '构建 npm run build'}
+                          {step.step === 'starting' && '启动开发服务器'}
+                          {step.step === 'preview_ready' && '预览就绪'}
+                        </span>
+                      </div>
+                    ),
+                  )}
 
                   {message.errors.map((error, index) => (
                     <div className="bub error" key={`${message.messageId}-e${index}`}>

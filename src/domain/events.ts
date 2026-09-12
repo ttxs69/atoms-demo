@@ -56,9 +56,13 @@ export type TransientEvent =
   | { type: 'sandbox_state'; state: 'booting' | 'resuming' | 'ready' | 'paused' }
   | {
       type: 'run_step';
-      step: 'installing' | 'building' | 'starting' | 'preview_ready';
+      step: 'installing' | 'building' | 'starting' | 'preview_ready' | 'autofixing';
       /** Present on preview_ready: the URL the preview iframe should load. */
       url?: string;
+      /** Present on autofixing: which repair round this is. */
+      attempt?: number;
+      /** Present on autofixing: the raw build error, for the folded detail view. */
+      error?: string;
     };
 
 /**

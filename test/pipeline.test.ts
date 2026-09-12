@@ -104,10 +104,19 @@ test('build failure surfaces an error event and skips the dev server', async () 
   const sandbox = new FakeSandbox();
   sandbox.failCommand(/run build/, 'TS2304: Cannot find name', 99);
   const orchestrator = makeOrchestrator(sandbox, {
-    eng: [writeTurn({ 'package.json': '{}' }), done],
+    eng: [
+      writeTurn({ 'package.json': '{}' }),
+      done,
+      writeTurn({ 'package.json': '{"fix":1}' }),
+      done,
+      writeTurn({ 'package.json': '{"fix":2}' }),
+      done,
+      writeTurn({ 'package.json': '{"fix":3}' }),
+      done,
+    ],
   });
 
-  const events = await collect(orchestrator.run('s-fail-build', 'go'))
+  const events = await collect(orchestrator.run('s-fail-build', 'go'));
 
   assert.ok(events.some((e) => e.type === 'error'));
   assert.equal(sandbox.background.length, 0);
@@ -297,4 +306,125 @@ test('concurrent runs on one session serialize: pm plans exactly once', async ()
   assert.equal(planCalls, 1, 'only the first run plans');
   assert.ok(events2.some((e) => e.type === 'tool_result'), 'second run still wrote');
   assert.ok(!events2.some((e) => e.type === 'plan_ready'), 'second run is an iterate turn');
+});
+
+// ─── ticket 05: bounded self-repair on build failure ──────────────────────
+
+/** An eng turn that just talks (used for scripted fix rounds). */
+const chatter = (text: string): ScriptedTurn => [{ type: 'text', delta: text }];
+
+test('build fails through all repair rounds: autofix runs, then gave_up — files survive', async () => {
+  const sandbox = new FakeSandbox();
+  sandbox.failCommand(/run build/, 'TS2304: Cannot find name "TodoItem" — src/App.tsx:14', 99);
+  const orchestrator = makeOrchestrator(sandbox, {
+    eng: [
+      writeTurn({ 'src/App.tsx': 'broken' }),
+      done,
+      writeTurn({ 'src/App.tsx': 'fix 1' }),
+      done,
+      writeTurn({ 'src/App.tsx': 'fix 2' }),
+      done,
+      writeTurn({ 'src/App.tsx': 'fix 3' }),
+      done,
+    ],
+  });
+
+  const events = await collect(orchestrator.run('s-giveup', 'make an app'));
+
+  const builds = events.filter(
+    (e) => e.type === 'run_step' && e.step === 'building',
+  ).length;
+  const fixes = events.filter(
+    (e) => e.type === 'run_step' && e.step === 'autofixing',
+  ).length;
+  const gaveUp = events.find(
+    (e): e is Extract<StreamEvent, { type: 'error' }> =>
+      e.type === 'error' && e.message.includes('未能通过'),
+  );
+
+  assert.equal(builds, 4, 'initial build + one per repair round');
+  assert.equal(fixes, 3, 'three repair rounds — the promised count');
+  assert.ok(gaveUp, 'gave_up error surfaces');
+  assert.ok(gaveUp.message.includes('下一步建议'), 'carries a next-step suggestion');
+  assert.ok(gaveUp.message.includes('文件都保留'), 'says files survive');
+  assert.ok(!events.some((e) => e.type === 'run_step' && e.step === 'preview_ready'));
+  // Content — not just paths — survives the failures.
+  const sid = [...sandbox.files.keys()][0]!;
+  assert.equal(await sandbox.readFile(sid, 'src/App.tsx'), 'fix 3');
+  assert.equal(sandbox.paused.size, 1, 'gave_up still pauses');
+});
+
+test('a repair round that writes nothing gives up immediately instead of rebuilding', async () => {
+  const sandbox = new FakeSandbox();
+  sandbox.failCommand(/run build/, 'boom', 99);
+  const orchestrator = makeOrchestrator(sandbox, {
+    eng: [writeTurn({ 'src/App.tsx': 'v1' }), done, chatter('I see no problem')],
+  });
+
+  const events = await collect(orchestrator.run('s-nofix', 'go'));
+
+  const builds = events.filter(
+    (e) => e.type === 'run_step' && e.step === 'building',
+  ).length;
+  assert.equal(builds, 1, 'the unproductive round is the only one — no rebuild of identical code');
+  assert.ok(events.some((e) => e.type === 'error' && e.message.includes('未能通过')));
+});
+
+test('build fails twice then passes: repair continues to a live preview', async () => {
+  const sandbox = new FakeSandbox();
+  sandbox.failCommand(/run build/, 'TS2304: first failure', 2);
+  const orchestrator = makeOrchestrator(sandbox, {
+    eng: [
+      writeTurn({ 'src/App.tsx': 'v1' }),
+      done,
+      writeTurn({ 'src/App.tsx': 'v2' }),
+      done,
+      writeTurn({ 'src/App.tsx': 'v3' }),
+      done,
+    ],
+  });
+
+  const events = await collect(orchestrator.run('s-recovered', 'go'));
+
+  assert.ok(events.some((e) => e.type === 'run_step' && e.step === 'preview_ready'));
+  assert.equal(sandbox.paused.size, 1);
+  const fixes = events.filter(
+    (e) => e.type === 'run_step' && e.step === 'autofixing',
+  ).length;
+  assert.equal(fixes, 2);
+});
+
+test('the fix turn receives the raw build error in its prompt', async () => {
+  const sandbox = new FakeSandbox();
+  sandbox.failCommand(/run build/, 'TS2304: Cannot find name "TodoItem"', 1);
+  const model = new FakeModel({
+    pm: planTurn(['src/App.tsx']),
+    eng: [writeTurn({ 'src/App.tsx': 'x' }), done, writeTurn({ 'src/App.tsx': 'fixed' }), done],
+  });
+  const orchestrator = createOrchestrator({ sandbox, model, credits: new FakeCredits() });
+
+  await collect(orchestrator.run('s-ctx', 'go'));
+
+  const fixCall = model.calls
+    .filter((c) => c.agentHandle === 'eng')
+    .find((c) => JSON.stringify(c.messages).includes('TS2304'));
+  assert.ok(fixCall, 'a fix turn saw the raw error');
+});
+
+test('autofixing events carry the attempt number and the raw error', async () => {
+  const sandbox = new FakeSandbox();
+  sandbox.failCommand(/run build/, 'boom-1', 1);
+  const orchestrator = makeOrchestrator(sandbox, {
+    eng: [writeTurn({ 'src/App.tsx': 'x' }), done, writeTurn({ 'src/App.tsx': 'fixed' }), done],
+  });
+
+  const events = await collect(orchestrator.run('s-attempt', 'go'));
+  const fix = events.find(
+    (e): e is Extract<StreamEvent, { type: 'run_step' }> =>
+      e.type === 'run_step' && e.step === 'autofixing',
+  ) as unknown as { attempt: number; error: string } | undefined;
+
+  assert.ok(fix, 'autofixing event present');
+  assert.equal(fix!.attempt, 1);
+  assert.ok(fix!.error.includes('boom-1'), 'raw error travels with the event');
 });

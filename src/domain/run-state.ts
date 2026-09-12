@@ -35,8 +35,9 @@ export type RunState =
   | 'idle_iterate';
 
 /**
- * Edges the run may take. `autofixing` self-loops because a bounded retry is a
- * loop with a cap of 3.
+ * Edges the run may take. The bounded retry cycles via
+ * building → failed → autofixing → building (at most three repair rounds)
+ * rather than through a self-edge.
  *
  * Note there is no edge from `gate_failed` to `autofixing`, and no edge from
  * `gate_failed` at all — a gate failure is terminal for the run and returns
