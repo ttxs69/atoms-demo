@@ -71,6 +71,8 @@ export function Workspace() {
   const [streaming, setStreaming] = useState(false);
   const [fatal, setFatal] = useState<string | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [stopped, setStopped] = useState(false);
+  const abortRef = useRef<AbortController | null>(null);
   const [device, setDevice] = useState<'desktop' | 'tablet' | 'mobile'>('desktop');
   // The workspace file tree — skeleton-first: filled by plan_ready, then each
   // row moves planned → writing → done as Alex works. Keyed by path so plan
@@ -115,6 +117,8 @@ export function Workspace() {
       }
     } else if (event.type === 'run_step' && event.step === 'preview_ready' && event.url) {
       setPreviewUrl(event.url);
+    } else if (event.type === 'interrupted') {
+      setStopped(true);
     } else if (event.type === 'plan_ready') {
       // Dedupe by path: a duplicated path in the plan would otherwise
       // inflate the denominator and render two rows that both flip.
@@ -260,11 +264,14 @@ export function Workspace() {
       { kind: 'user', messageId: `u-${prev.length}`, text: message },
     ]);
 
+    const controller = new AbortController();
+    abortRef.current = controller;
     try {
       const response = await fetch('/api/generate', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ sessionId: sessionIdRef.current, message }),
+        signal: controller.signal,
       });
 
       if (!response.ok || !response.body) {
@@ -287,7 +294,9 @@ export function Workspace() {
         for (const event of events) applyEvent(event);
       }
     } catch (error) {
-      setFatal(error instanceof Error ? error.message : String(error));
+      if (!controller.signal.aborted) {
+        setFatal(error instanceof Error ? error.message : String(error));
+      }
     } finally {
       setStreaming(false);
     }
@@ -427,15 +436,53 @@ export function Workspace() {
               aria-label="描述你想做的东西"
               disabled={streaming}
             />
+            {stopped ? (
+              <div className="stopped-banner">
+                <span>已停止 —— 已生成的文件都保留了。</span>
+                <div className="stopped-actions">
+                  <button
+                    type="button"
+                    className="btn primary"
+                    onClick={() => {
+                      setStopped(false);
+                      document.querySelector<HTMLTextAreaElement>('textarea')?.focus();
+                    }}
+                  >
+                    继续刚才的
+                  </button>
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={() => {
+                      // 换个方向重来：新会话，对话与预览清空（沙箱文件可保留）
+                      sessionIdRef.current = `s-${Date.now()}`;
+                      setMessages([]);
+                      setPlanFiles([]);
+                      setPreviewUrl(null);
+                      setStopped(false);
+                      setLog([]);
+                    }}
+                  >
+                    换个方向重来
+                  </button>
+                </div>
+              </div>
+            ) : null}
             <div className="composer-row">
-              <button
-                type="button"
-                className="btn primary"
-                onClick={() => void submit()}
-                disabled={streaming || input.trim().length === 0}
-              >
-                {streaming ? '生成中…' : '开始'}
-              </button>
+              {streaming ? (
+                <button type="button" className="btn danger" onClick={() => abortRef.current?.abort()}>
+                  ■ 停止
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="btn primary"
+                  onClick={() => void submit()}
+                  disabled={input.trim().length === 0}
+                >
+                  开始
+                </button>
+              )}
               <span className="spacer" />
               <span className="pill">⌘↩ 发送</span>
             </div>

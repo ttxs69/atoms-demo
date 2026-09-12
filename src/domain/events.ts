@@ -54,6 +54,7 @@ export type TransientEvent =
   | { type: 'plan_ready'; files: readonly string[] }
   | { type: 'gate_started'; gate: string }
   | { type: 'sandbox_state'; state: 'booting' | 'resuming' | 'ready' | 'paused' }
+  | { type: 'interrupted'; reason: 'user' | 'disconnect' }
   | {
       type: 'run_step';
       step: 'installing' | 'building' | 'starting' | 'preview_ready' | 'autofixing';

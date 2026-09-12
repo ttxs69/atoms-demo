@@ -445,3 +445,27 @@ details.activity .log {
   max-height: 180px;
   overflow-y: auto;
 }
+
+/* Interrupted state (ticket 06) ------------------------------------------ */
+.btn.danger {
+  border-color: #fecaca;
+  background: var(--err-soft);
+  color: var(--err);
+}
+.stopped-banner {
+  margin-top: 10px;
+  border: 1px solid #fde68a;
+  background: #fffbeb;
+  border-radius: var(--r);
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 13px;
+  color: #92400e;
+}
+.stopped-actions {
+  display: flex;
+  gap: 8px;
+}

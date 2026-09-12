@@ -28,7 +28,11 @@ export interface Orchestrator {
    * The stream carries both durable events and transient progress: `StreamEvent`
    * is the union. Only the `ForgeEvent` half is persisted.
    */
-  run(sessionId: string, userInput: string): AsyncIterable<StreamEvent>;
+  run(
+    sessionId: string,
+    userInput: string,
+    opts?: { signal?: AbortSignal },
+  ): AsyncIterable<StreamEvent>;
 }
 
 /** What `write_file` expects once its streamed argument JSON is complete. */
@@ -79,6 +83,13 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
    * one within a process.
    */
   const plannedSessions = new Set<string>();
+
+  /**
+   * Sessions whose last turn was interrupted. The next run prepends a
+   * "you were interrupted here" line so the model continues instead of
+   * repeating finished work.
+   */
+  const interruptedSessions = new Set<string>();
 
   /**
    * Single writer per session (spec: 工作区写入是单写者). Concurrent run()s —
@@ -344,6 +355,7 @@ function parsePlanArgs(raw: string): Plan {
     agentHandle: AgentHandle,
     conversation: (ModelMessage | StepMessage)[],
     sandboxId: string,
+    signal?: AbortSignal,
   ): AsyncGenerator<
     StreamEvent,
     { filesWritten: number; plan: Plan | null; paths: string[] }
@@ -361,6 +373,7 @@ function parsePlanArgs(raw: string): Plan {
       const stepResults: ToolResultPart[] = [];
 
       for await (const chunk of deps.model.stream(agentHandle, conversation)) {
+        if (signal?.aborted) break;
         switch (chunk.type) {
           case 'text': {
             yield { type: 'text_delta', agentHandle, delta: chunk.delta };
@@ -459,7 +472,11 @@ function parsePlanArgs(raw: string): Plan {
   }
 
   const api = {
-    async *run(sessionId: string, userInput: string): AsyncIterable<StreamEvent> {
+    async *run(
+      sessionId: string,
+      userInput: string,
+      opts?: { signal?: AbortSignal },
+    ): AsyncIterable<StreamEvent> {
       // Serialize per session: the previous run's tail (pipeline, pause)
       // completes before this one starts, keeping one writer on the sandbox.
       // Entries are never deleted — each holds one resolved promise per
@@ -473,13 +490,17 @@ function parsePlanArgs(raw: string): Plan {
       await previous;
 
       try {
-        yield* api.runSerialized(sessionId, userInput);
+        yield* api.runSerialized(sessionId, userInput, opts);
       } finally {
         release();
       }
     },
 
-    async *runSerialized(sessionId: string, userInput: string): AsyncIterable<StreamEvent> {
+    async *runSerialized(
+      sessionId: string,
+      userInput: string,
+      opts?: { signal?: AbortSignal },
+    ): AsyncIterable<StreamEvent> {
       const sandboxId = await sandboxFor(sessionId);
       // Written this turn — feeds the fix turns so Alex knows the project.
       const pathsWritten = new Set<string>();
@@ -493,12 +514,18 @@ function parsePlanArgs(raw: string): Plan {
       // On iterate turns (the app exists) planning is skipped entirely —
       // modification scope is small and the preview is already visible.
       let engPrompt = userInput;
+      if (interruptedSessions.has(sessionId)) {
+        interruptedSessions.delete(sessionId);
+        engPrompt = `（上一轮在此处被中断，已写入的文件都在。）\n\n${userInput}`;
+        userInput = engPrompt;
+      }
       if (isFirstTurn) {
         yield { type: 'agent_started', agentHandle: 'pm', messageId: `msg-${++messageCounter}` };
         const pmResult = yield* runAgentSteps(
           'pm',
           [{ role: 'user', content: userInput }],
           sandboxId,
+          opts?.signal,
         );
         yield { type: 'agent_done', agentHandle: 'pm', creditsUsed: 0 };
 
@@ -515,17 +542,43 @@ function parsePlanArgs(raw: string): Plan {
       }
 
       // ── Alex builds. ──────────────────────────────────────────────────
-      yield { type: 'agent_started', agentHandle: 'eng', messageId: `msg-${++messageCounter}` };
-      const engResult = yield* runAgentSteps(
-        'eng',
-        [{ role: 'user', content: engPrompt }],
-        sandboxId,
-      );
+      let aborted = opts?.signal?.aborted === true;
+      let engResult: { filesWritten: number; plan: Plan | null; paths: string[] } = {
+        filesWritten: 0,
+        plan: null,
+        paths: [],
+      };
+      if (!aborted) {
+        yield { type: 'agent_started', agentHandle: 'eng', messageId: `msg-${++messageCounter}` };
+        engResult = yield* runAgentSteps(
+          'eng',
+          [{ role: 'user', content: engPrompt }],
+          sandboxId,
+          opts?.signal,
+        );
+        aborted = opts?.signal?.aborted === true;
+      }
+
+      if (aborted) {
+        // The user stopped mid-generation. Everything written so far stays;
+        // the pipeline is skipped (an incomplete app has no preview to
+        // serve); credits settle on actual usage; the session is marked so
+        // the next turn knows where it stopped.
+        interruptedSessions.add(sessionId);
+        yield { type: 'interrupted', reason: 'user' };
+        await deps.credits.settle(sessionId, 0);
+        // Pause: files are kept, but a stopped run must not keep burning
+        // paid runtime until the E2B timeout.
+        await deps.sandbox.pause(sandboxId);
+        yield { type: 'agent_done', agentHandle: 'eng', creditsUsed: 0 };
+        return;
+      }
 
       if (engResult.filesWritten > 0) {
         try {
           for (const path of engResult.paths) pathsWritten.add(path);
           for await (const stepEvent of runPipeline(sandboxId, pathsWritten)) {
+            if (opts?.signal?.aborted) break;
             yield stepEvent;
           }
         } catch (error) {

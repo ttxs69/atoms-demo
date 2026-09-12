@@ -74,10 +74,17 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   const encoder = new TextEncoder();
+  // The stop button aborts the client fetch; the stream's cancel hook and
+  // request.signal (client disconnect) both propagate into the orchestrator.
+  const abort = new AbortController();
+  request.signal.addEventListener('abort', () => abort.abort(), { once: true });
+
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       try {
-        for await (const event of orchestrator.run(sessionId, message)) {
+        for await (const event of orchestrator.run(sessionId, message, {
+          signal: abort.signal,
+        })) {
           controller.enqueue(encoder.encode(encodeEvent(event)));
         }
       } catch (error) {
@@ -93,6 +100,9 @@ export async function POST(request: Request): Promise<Response> {
       } finally {
         controller.close();
       }
+    },
+    cancel() {
+      abort.abort();
     },
   });
 

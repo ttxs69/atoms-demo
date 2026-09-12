@@ -428,3 +428,62 @@ test('autofixing events carry the attempt number and the raw error', async () =>
   assert.equal(fix!.attempt, 1);
   assert.ok(fix!.error.includes('boom-1'), 'raw error travels with the event');
 });
+
+// ─── ticket 06: interrupt without losing work ─────────────────────────────
+
+test('abort mid-generation: files kept, interrupted event, settle, no pipeline', async () => {
+  const sandbox = new FakeSandbox();
+  const credits = new FakeCredits();
+  const model = new FakeModel({
+    pm: planTurn(['a.txt', 'b.txt', 'c.txt']),
+    eng: [writeTurn({ 'a.txt': 'one' }), writeTurn({ 'b.txt': 'two' }), writeTurn({ 'c.txt': 'three' })],
+  });
+  const orchestrator = createOrchestrator({ sandbox, model, credits });
+  const controller = new AbortController();
+
+  const events: StreamEvent[] = [];
+  const stream = orchestrator.run('s-stop', 'make things', { signal: controller.signal });
+  for await (const event of stream) {
+    events.push(event);
+    // Abort on the first FILE WRITE result — pm's plan_files doesn't count.
+    const result = event.type === 'tool_result' ? (event.result as { path?: string }) : null;
+    if (result?.path) controller.abort();
+  }
+
+  assert.ok(events.some((e) => e.type === 'interrupted'), 'interrupt surfaces');
+  // First file landed before the abort and survives.
+  assert.ok(sandbox.allPaths().includes('a.txt'), 'written file kept');
+  // No install/build ran — the app is incomplete, the pipeline is skipped.
+  assert.ok(!sandbox.commands.some((c) => c.cmd.startsWith('npm install')));
+  // Settlement happened (actual usage; token metering lands with ticket 08).
+  assert.equal(credits.settlements.length, 1);
+  // The turn still closes cleanly.
+  assert.ok(events.some((e) => e.type === 'agent_done'));
+  assert.equal(sandbox.paused.size, 1, 'sandbox pauses even when interrupted');
+});
+
+test('the turn after an interrupt knows where it stopped', async () => {
+  const sandbox = new FakeSandbox();
+  const model = new FakeModel({
+    pm: planTurn(['a.txt']),
+    // turn 1: one write then we abort; turn 2 continues
+    eng: [writeTurn({ 'a.txt': 'one' }), [{ type: 'text', delta: '继续' }]],
+  });
+  const orchestrator = createOrchestrator({ sandbox, model, credits: new FakeCredits() });
+  const controller = new AbortController();
+
+  const it = orchestrator.run('s-resume', 'go', { signal: controller.signal })[Symbol.asyncIterator]();
+  let ev = await it.next();
+  while (!ev.done) {
+    if (ev.value.type === 'tool_result') { controller.abort(); }
+    ev = await it.next();
+  }
+
+  await collect(orchestrator.run('s-resume', '继续刚才的'));
+
+  const secondEng = model.calls.filter((c) => c.agentHandle === 'eng')[1];
+  assert.ok(
+    secondEng && JSON.stringify(secondEng.messages).includes('中断'),
+    'next prompt carries the interruption marker',
+  );
+});
