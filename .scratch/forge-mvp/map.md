@@ -95,7 +95,36 @@
   内部 token 精确计量 / 外部抽象点数展示；**预扣+结算必须数据库原子**（行锁 + 幂等键）；
   防刷三层：Supabase 自带 IP 限流 30/时 + Turnstile invisible + 额度按 `userId` 分桶；
   额度耗尽硬拦截并给出下一步；每日重置不累积；匿名用户 30 天无活动清理。
-  情景约束：认证页必须动态渲染（局 Next.js 静态缓存安全隐患）；代理后面需 `Sb-Forwarded-For` + secret key
+  情景约束：认证页必须动态渲染（Next.js 静态缓存安全隐患）；代理后面需 `Sb-Forwarded-For` + secret key
+
+- [Orchestrator 接口](issues/06-orchestrator-interface.md) — **Mastra** 作为框架（其 `AgentNetwork`
+  已 deprecated，官方改推 supervisor 模式，我们直接采用）；一个角色 = 一个 Agent 实例
+  （instructions + tools 白名单 + model）；共享 message history 不做隔离；
+  **并行按操作类别分区**：只读分析类自由并行，设计推理类（`@pm`/`@arch`）串行、保持两个角色不合并，
+  写入单写者；冲突由 Mike 汇总后呈现两个意见并给出推荐，不自动裁决；
+  **生成协议改用原生 tool call**（撤回 bolt.new XML 方案）；SSE 事件流带 `agentHandle` 分路。
+  回填：`plan_ready` / `gate_started` / `sandbox_state` 三个额外事件用
+  Mastra `writer.custom({ transient: true })` 实现，不扩展顶层 `ForgeEvent` 类型
+
+- [生成的应用如何取得数据库与登录](issues/08-generated-app-backend.md) — **共享 Supabase 项目 + RLS 多租户**
+  （每用户独立项目需 Supabase 账号 + 分钟级 provision，与“打开即用”相背）；
+  E2B 沙箱封住了 WebContainer 留下的“无服务端”缺口：secret key 只活在沙箱环境变量里，不写文件；
+  **两道强制安全门控**：平台注入 RLS 模板（agent 不可 opt-out）+ Security Advisor 扫描。
+  关键认知（官方原文）：*“adding policies doesn't remove grants”*——只写策略不撤销 grant 的表仍不安全。
+  已知 bug：`supabase db advisors --local` 漏掉 `rls_disabled_in_public`（issue #5868），不能当作唯一门控
+
+- [生成循环的用户体验](issues/09-generation-loop-ux.md) — 框架：**骨架先行（仅首轮）**，
+  文件树先以灰色占位长出再逐个填充；安全门控失败**不自动重试**（与构建失败性质不同）；
+  中断保留已写文件且 partial message 标记 `interrupted`；第二轮修改跳过 install。
+  **E2B auto-resume 是内置的**——请求到达时沙箱自动唤醒，不需写恢复逻辑。
+  实现约束：必须用最新 E2B SDK（issue #875：`connect` 会覆盖 `autoPause` 导致沙箱被杀，已于 2026-05-15 修复）
+
+- [MVP 范围裁剪](issues/10-mvp-scope-cut.md) — 路线 B；5 个决策：多轮迭代有/版本回滚无、
+  不做发布、不做点选编辑、3 个角色（`@lead`+`@pm`+`@eng`）、应用后端有。
+  输出 25 项必做功能清单；**时间盒由 1 个周末修订为 3–5 个周末**
+  （原估值在不知道 license 问题、GC 须自建、schema 一致性约束之前定的）
+
+## Not yet specified
 
 - **生成内容的滥用检测** —— 终点是"陌生人公开生成"，意味着有人会生成钓鱼页、挖矿脚本。
   检测放在生成时还是发布时？靠模型自查还是规则？目前还看不清该问什么。

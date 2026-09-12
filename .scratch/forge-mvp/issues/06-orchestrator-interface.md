@@ -163,6 +163,32 @@ Mastra 本身即 SSE-first（`agent.stream()` 返回 async iterable），方向�
 
 否决"前端按 message 元数据推断"：单 agent 下够用，一上并行就要重写。
 
+#### 回填：「生成循环的用户体验」原型发现的额外事件
+
+原型（`prototypes/generation-loop.mjs`）跑出三个**契约里没有但必须发**的事件：
+
+| 事件 | 为什么需要 |
+|---|---|
+| `plan_ready` | 骨架先行的触发点：Emma 出 spec 后立即给出文件清单，文件树先以灰色占位长出。没有它，首个文件写完前只有 spinner |
+| `gate_started` | ticket 08 的两道门控（migration + Security Advisor）合计 5–15 秒，静默会被当成卡死 |
+| `sandbox_state` | E2B resume 需"正在恢复"反馈（约 1 秒，但不能无声） |
+
+**这三个不需要扩展上面的顶层 `ForgeEvent` 类型。** Mastra 支持工具内部往当前流写自定义事件：
+
+```typescript
+execute: async ({ inputData, writer }) => {
+  await writer.write({ type: 'custom-event', status: 'pending' })
+  const response = await fetch(url)
+  await writer.write({ type: 'custom-event', status: 'success' })
+}
+```
+
+并且有 **transient chunk** 概念——跳过持久化，专为"高频、量大、只在当下有意义"的
+进度更新设计（`writer.custom({ ..., transient: true })`）。
+三个事件都属于这一类：用 transient 发即可，不占存储、刷新后不重现。
+
+来源：<https://mastra.ai/en/docs/streaming/overview>
+
 ### 数据流总览
 
 ```
@@ -179,8 +205,8 @@ Mastra
 
 ### 下游影响
 
-- ticket 09（生成循环 UX）：事件结构已定，预览 URL 由 E2B 端口转发暴露
-- ticket 10（MVP 范围裁剪）：orchestrator 设计确定，可以开始
+- ticket 09（生成循环 UX）：已解决，并回填了三个额外事件（见上）
+- ticket 10（MVP 范围裁剪）：已解决
 
 ### 新增的 fog
 
