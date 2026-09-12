@@ -131,6 +131,17 @@
   输出 25 项必做功能清单；**时间盒由 1 个周末修订为 3–5 个周末**
   （原估值在不知道 license 问题、GC 须自建、schema 一致性约束之前定的）
 
+- [部署形态与运行时架构](issues/14-deployment-runtime.md) — **Railway 长驻单机**
+  （Next.js standalone + Mastra orchestrator 同进程 + cron service + Postgres plugin）。
+  决定性依据：**Vercel Hobby 的 maxDuration 是 300s 硬上限、Pro 800s，且 SSE 继承该限制**——
+  一次完整生成链 1–3 分钟起，自修复重试后更长，Serverless 撑不住；Vercel Workflows 仍 beta 无 GA 承诺。
+  Railway 另有两个天然契合：cron 是 first-class（GC 的载体）、Postgres 同区（credits 行锁延迟低）。月成本 ~$15–20。
+  **认证页不需要 `force-dynamic`**：Next.js 官方文档明确 `cookies()` 自动触发动态渲染，
+  Supabase 的 `createServerClient` 本就读 cookies；要防的只有“既不读 cookies 又不应被缓存”的路由。
+  平台密钥走 Railway 环境变量（进程级隔离即合理边界，Vault 是过度设计）；
+  可观测性 = Railway 内置日志 + ticket 07 管理页加一栏最近错误，不引入 Sentry。
+  **`docs/03-architecture.md` 大半已失效**（k8s / 自研 BaaS / WebContainer 三个前提都被推翻），实现时需重写
+
 ## Not yet specified
 
 - **E2B 预览 URL 的 iframe 可嵌入性** —— ticket 11 的 B 方案（双栏分屏）
