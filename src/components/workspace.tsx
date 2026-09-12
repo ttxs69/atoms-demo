@@ -605,6 +605,13 @@ export function Workspace() {
               </>
             ) : null}
             <div className="spacer" />
+            <a
+              className="btn small"
+              href={`/api/export?session=${encodeURIComponent(sessionIdRef.current)}`}
+              download
+            >
+              导出 zip
+            </a>
             {previewUrl ? (
               <a className="pill" href={previewUrl} target="_blank" rel="noopener noreferrer">
                 ↗ 新标签页

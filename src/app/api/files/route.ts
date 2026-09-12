@@ -36,6 +36,9 @@ export async function GET(request: Request): Promise<Response> {
   }
   const sandboxId = sandboxes[0]!.sandboxId;
   const sandbox = await Sandbox.connect(sandboxId, { apiKey });
+  // getInfo() resumes a paused sandbox (per the API docs) — filesystem ops
+  // against a paused sandbox queue indefinitely instead of waking it.
+  await sandbox.getInfo();
 
   if (path === null) {
     // Tree: scaffold + src, no node_modules noise.

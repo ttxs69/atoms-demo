@@ -67,3 +67,31 @@ test('transient progress events travel over the same wire', () => {
 
   assert.deepEqual(decodeEvents(encodeEvent(event)).events, [event]);
 });
+
+test('buildZip produces an archive unzip can read (round-trip)', async () => {
+  const { execFileSync } = await import('node:child_process');
+  const { mkdtempSync, readFileSync, readdirSync, writeFileSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { buildZip } = await import('../src/transport/zip.ts');
+
+  const zip = buildZip(
+    new Map([
+      ['package.json', '{"name":"forge-app"}'],
+      ['src/App.tsx', 'export default function App() { return <h1>ok</h1> }'],
+    ]),
+  );
+
+  const dir = mkdtempSync(join(tmpdir(), 'forge-zip-'));
+  const zipPath = join(dir, 'a.zip');
+  writeFileSync(zipPath, zip);
+
+  execFileSync('unzip', ['-q', zipPath, '-d', dir]);
+  const names = readdirSync(dir).sort();
+  assert.ok(names.includes('a.zip') && names.includes('package.json') && names.includes('src'));
+  assert.equal(readFileSync(join(dir, 'package.json'), 'utf8'), '{"name":"forge-app"}');
+  assert.equal(
+    readFileSync(join(dir, 'src', 'App.tsx'), 'utf8'),
+    'export default function App() { return <h1>ok</h1> }',
+  );
+});
