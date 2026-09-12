@@ -1,0 +1,480 @@
+<!doctype html>
+<!--
+  THROWAWAY PROTOTYPE — ticket 11 (对话 + 预览界面布局)
+
+  回答的问题：对话、预览、代码、状态四块东西，在一屏里怎么摆？
+
+  三个方案差异是结构性的，不是配色：
+    A  对话主栏      预览是抽屉，覆盖上来。对话永远占满宽度。
+    B  双栏分屏      左对话右预览，并列。Atoms 的形态（但砍掉第三栏）。
+    C  预览主栏      应用是主角，对话退成侧栏。适合"已经在改一个能跑的应用"。
+
+  URL 参数：?v=a|b|c    &mobile=1    &state=empty|generating|editing|error
+
+  打开方式：open prototypes/ui-layout.html   （纯静态，无需服务器）
+-->
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>THROWAWAY · Forge 界面布局对比</title>
+<style>
+  :root{
+    --n0:#fafafa; --n1:#f4f4f5; --n2:#e4e4e7; --n3:#a1a1aa;
+    --n4:#71717a; --n5:#3f3f46; --n6:#18181b;
+    --accent:#6d5ce7; --accent-soft:#eeebfd;
+    --ok:#15803d; --ok-soft:#dcfce7;
+    --warn:#b45309; --warn-soft:#fef3c7;
+    --err:#b91c1c; --err-soft:#fee2e2;
+    --r:8px; --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:var(--sans);background:var(--n1);color:var(--n6);
+       font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
+  button{font:inherit;cursor:pointer;border:none;background:none;color:inherit}
+
+  /* ── 外壳：模拟浏览器窗口 ───────────────────────────── */
+  .frame{max-width:1280px;margin:0 auto;background:var(--n0);min-height:100vh;
+         display:flex;flex-direction:column;box-shadow:0 0 0 1px var(--n2)}
+  .topbar{height:48px;border-bottom:1px solid var(--n2);display:flex;align-items:center;
+          gap:12px;padding:0 16px;flex-shrink:0;background:var(--n0);z-index:30}
+  .logo{font-weight:600;letter-spacing:-.01em}
+  .logo span{color:var(--accent)}
+  .crumb{color:var(--n4);font-size:13px}
+  .spacer{flex:1}
+  .pill{font-size:12px;padding:2px 8px;border-radius:99px;background:var(--n1);
+        border:1px solid var(--n2);color:var(--n4)}
+  .pill.run{background:var(--accent-soft);border-color:#d8d2fb;color:var(--accent)}
+  .pill.ok{background:var(--ok-soft);border-color:#bbf7d0;color:var(--ok)}
+  .pill.err{background:var(--err-soft);border-color:#fecaca;color:var(--err)}
+  .btn{padding:5px 12px;border-radius:6px;border:1px solid var(--n2);background:#fff;
+       font-size:13px;font-weight:500}
+  .btn:hover{background:var(--n1)}
+  .btn.primary{background:var(--n6);color:#fff;border-color:var(--n6)}
+  .btn.primary:hover{background:var(--n5)}
+
+  /* ── 布局容器 ───────────────────────────────────────── */
+  .body{flex:1;display:flex;min-height:0;position:relative}
+  .chat{display:flex;flex-direction:column;min-width:0;background:var(--n0)}
+  .chat-scroll{flex:1;overflow-y:auto;padding:20px}
+  .composer{border-top:1px solid var(--n2);padding:12px 16px 14px;flex-shrink:0;background:var(--n0)}
+  .pv{display:flex;flex-direction:column;background:var(--n1);min-width:0}
+  .pv-bar{height:40px;border-bottom:1px solid var(--n2);display:flex;align-items:center;
+          gap:8px;padding:0 10px;flex-shrink:0;background:var(--n0)}
+  .pv-stage{flex:1;padding:16px;overflow:auto;display:flex;
+            align-items:flex-start;justify-content:center}
+  .screen{width:100%;max-width:var(--scr,100%);background:#fff;border:1px solid var(--n2);
+          border-radius:var(--r);min-height:340px;overflow:hidden;
+          box-shadow:0 1px 3px rgba(0,0,0,.04)}
+  .screen.wide{--scr:100%} .screen.tab{--scr:768px} .screen.mob{--scr:390px}
+
+  /* A: 抽屉 */
+  .body.a .chat{flex:1}
+  .body.a .pv{position:absolute;top:0;right:0;bottom:0;width:min(620px,62%);
+              border-left:1px solid var(--n2);box-shadow:-12px 0 32px rgba(0,0,0,.10);
+              transform:translateX(100%);transition:transform .22s ease;z-index:20}
+  .body.a.drawer .pv{transform:translateX(0)}
+
+  /* B: 双栏 */
+  .body.b .chat{flex:1 1 46%;border-right:1px solid var(--n2)}
+  .body.b .pv{flex:1 1 54%}
+
+  /* C: 预览主栏 */
+  .body.c .pv{flex:1;order:2}
+  .body.c .chat{flex:0 0 340px;order:1;border-right:1px solid var(--n2)}
+  .body.c .pv-stage{padding:24px}
+
+  /* ── 对话内容 ───────────────────────────────────────── */
+  .msg{margin-bottom:18px}
+  .who{display:flex;align-items:center;gap:7px;margin-bottom:6px;
+       font-size:12px;font-weight:600;color:var(--n5)}
+  .av{width:20px;height:20px;border-radius:5px;display:grid;place-items:center;
+      font-size:10px;font-weight:700;color:#fff;flex-shrink:0}
+  .av.lead{background:#6d5ce7} .av.pm{background:#0d9488}
+  .av.eng{background:#c2410c} .av.me{background:var(--n4)}
+  .bub{background:var(--n1);border:1px solid var(--n2);border-radius:var(--r);
+       padding:9px 12px;max-width:100%}
+  .me .bub{background:var(--accent-soft);border-color:#d8d2fb}
+
+  /* 流式写入块 —— ticket 09 的核心视觉 */
+  .stream{border:1px solid var(--n2);border-radius:var(--r);overflow:hidden;
+          font-family:var(--mono);font-size:12px;background:#fff}
+  .stream .hd{display:flex;align-items:center;gap:6px;padding:5px 10px;
+              background:var(--n1);border-bottom:1px solid var(--n2);
+              font-size:11px;color:var(--n4);font-family:var(--sans)}
+  .stream .ln{padding:2px 10px;white-space:pre;color:var(--n5)}
+  .stream .ln.cur{background:#f0fdf4}
+
+  /* 文件树 —— 骨架先行 */
+  .files{border:1px solid var(--n2);border-radius:var(--r);background:#fff;
+         overflow:hidden;margin:10px 0}
+  .files .fh{padding:5px 10px;background:var(--n1);border-bottom:1px solid var(--n2);
+             font-size:11px;color:var(--n4);font-weight:600;
+             text-transform:uppercase;letter-spacing:.04em}
+  .f{display:flex;align-items:center;gap:7px;padding:4px 10px;font-family:var(--mono);
+     font-size:12px}
+  .f .st{width:13px;text-align:center;flex-shrink:0}
+  .f.done .st{color:var(--ok)} .f.writing .st{color:var(--accent)}
+  .f.planned{color:var(--n3)} .f.planned .st{color:var(--n3)}
+  .f .sz{margin-left:auto;color:var(--n3);font-size:11px}
+  .f.writing{background:var(--accent-soft)}
+
+  /* 活动日志（折叠） */
+  details.act{border:1px solid var(--n2);border-radius:var(--r);background:#fff;margin-top:10px}
+  details.act>summary{padding:6px 10px;font-size:12px;color:var(--n4);
+                      cursor:pointer;list-style:none;display:flex;gap:6px;align-items:center}
+  details.act>summary::-webkit-details-marker{display:none}
+  details.act .body{padding:8px 10px;border-top:1px solid var(--n2);
+                    font-family:var(--mono);font-size:11px;color:var(--n4);
+                    max-height:150px;overflow-y:auto}
+  details.act .body div{padding:1px 0}
+
+  /* 门控 / 错误卡 */
+  .gate{border:1px solid #fecaca;background:var(--err-soft);border-radius:var(--r);
+        padding:12px;margin:12px 0}
+  .gate h4{font-size:13px;color:var(--err);margin-bottom:5px;display:flex;
+           align-items:center;gap:6px}
+  .gate p{font-size:12px;color:#7f1d1d;margin-bottom:9px}
+  .gate code{display:block;font-family:var(--mono);font-size:11px;color:#9f1239;
+             background:#fff;border:1px solid #fecaca;border-radius:5px;
+             padding:5px 8px;margin-bottom:9px;overflow-x:auto}
+  .row{display:flex;gap:8px;flex-wrap:wrap}
+
+  /* 输入区 */
+  .ta{border:1px solid var(--n2);border-radius:var(--r);padding:10px;background:#fff;
+      min-height:44px;color:var(--n4);font-size:13px}
+  .ctr{display:flex;align-items:center;gap:8px;margin-top:9px;font-size:12px}
+  .ctr .chip{padding:3px 9px;border:1px solid var(--n2);border-radius:99px;
+             background:#fff;color:var(--n4);font-size:11px}
+  .ctr .chip.on{background:var(--accent-soft);border-color:#d8d2fb;color:var(--accent)}
+  .quota{margin-left:auto;display:flex;align-items:center;gap:7px;color:var(--n4);
+         font-size:11px}
+  .bar{width:64px;height:5px;background:var(--n2);border-radius:99px;overflow:hidden}
+  .bar i{display:block;height:100%;width:70%;background:var(--accent)}
+
+  /* 空状态 */
+  .empty{max-width:520px;margin:8vh auto 0;text-align:center}
+  .empty h1{font-size:25px;letter-spacing:-.02em;margin-bottom:9px;font-weight:600}
+  .empty p{color:var(--n4);margin-bottom:22px;line-height:1.6}
+  .ex{display:grid;gap:7px;text-align:left}
+  .ex button{width:100%;text-align:left;padding:11px 13px;border:1px solid var(--n2);
+             border-radius:var(--r);background:#fff;font-size:13px;
+             display:flex;gap:9px;align-items:flex-start}
+  .ex button:hover{border-color:var(--accent);background:var(--accent-soft)}
+  .ex .ic{font-size:15px;line-height:1.2}
+  .ex small{display:block;color:var(--n4);font-size:11px;margin-top:2px}
+
+  /* 生成的假应用 */
+  .app{padding:20px;font-family:var(--sans)}
+  .app h2{font-size:17px;margin-bottom:14px;letter-spacing:-.01em}
+  .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+  .card{border:1px solid var(--n2);border-radius:var(--r);padding:12px;background:#fff}
+  .card .d{font-size:11px;color:var(--n4);margin-bottom:7px}
+  .mo{font-size:22px;line-height:1}
+
+  /* 悬浮切换栏 */
+  .switcher{position:fixed;left:50%;transform:translateX(-50%);bottom:18px;z-index:100;
+            display:flex;gap:5px;padding:4px;background:rgba(24,24,27,.93);
+            backdrop-filter:blur(12px);border-radius:11px;
+            box-shadow:0 8px 28px rgba(0,0,0,.28);align-items:center}
+  .switcher button{color:#a1a1aa;padding:6px 12px;border-radius:7px;font-size:12px;
+                   font-weight:500;white-space:nowrap}
+  .switcher button:hover{color:#fff;background:rgba(255,255,255,.09)}
+  .switcher button[aria-pressed=true]{background:#fff;color:var(--n6)}
+  .switcher .sep{width:1px;height:18px;background:rgba(255,255,255,.16);margin:0 3px}
+  .switcher .lbl{color:#71717a;font-size:11px;padding:0 4px}
+
+  .note{position:fixed;left:18px;bottom:18px;max-width:260px;z-index:99;
+        background:rgba(24,24,27,.93);backdrop-filter:blur(12px);color:#d4d4d8;
+        padding:10px 12px;border-radius:9px;font-size:11px;line-height:1.5}
+  .note b{color:#fff;display:block;margin-bottom:3px;font-size:12px}
+
+  @media(max-width:860px){
+    .body.b .chat{flex:1 1 100%;border-right:none}
+    .body.b .pv{display:none}
+    .body.c .chat{flex:1 1 100%}
+    .body.c .pv{display:none}
+    .body.a .pv{width:100%}
+    .note{display:none}
+  }
+</style>
+</head>
+<body>
+<div class="frame">
+  <div class="topbar">
+    <div class="logo">Forge<span>.</span></div>
+    <div class="crumb" id="crumb">每日心情记录</div>
+    <div class="spacer"></div>
+    <div id="status"></div>
+    <button class="btn" id="pvBtn">预览</button>
+    <button class="btn primary">导出</button>
+  </div>
+
+  <div class="body" id="shell">
+    <div class="chat">
+      <div class="chat-scroll" id="chatScroll"></div>
+      <div class="composer" id="composer"></div>
+    </div>
+    <div class="pv">
+      <div class="pv-bar">
+        <button class="btn" style="padding:3px 8px" data-dev="wide">桌面</button>
+        <button class="btn" style="padding:3px 8px" data-dev="tab">平板</button>
+        <button class="btn" style="padding:3px 8px" data-dev="mob">手机</button>
+        <div class="spacer"></div>
+        <span class="pill" id="pvUrl">3000-ixk2f9.e2b.app</span>
+        <button class="btn" style="padding:3px 8px">↗</button>
+      </div>
+      <div class="pv-stage"><div class="screen wide" id="screen"></div></div>
+    </div>
+  </div>
+</div>
+
+<div class="switcher">
+  <span class="lbl">布局</span>
+  <button data-v="a" aria-pressed="true">A 对话主栏</button>
+  <button data-v="b" aria-pressed="false">B 双栏分屏</button>
+  <button data-v="c" aria-pressed="false">C 预览主栏</button>
+  <div class="sep"></div>
+  <span class="lbl">状态</span>
+  <button data-s="empty" aria-pressed="false">空</button>
+  <button data-s="generating" aria-pressed="true">生成中</button>
+  <button data-s="error" aria-pressed="false">门控失败</button>
+  <button data-s="editing" aria-pressed="false">迭代</button>
+</div>
+
+<div class="note">
+  <b>THROWAWAY PROTOTYPE</b>
+  ticket 11 · 布局对比。按底部切换。<br>
+  A/B/C 的差异是结构性的，不是配色。
+</div>
+
+<script>
+const P = new URLSearchParams(location.search);
+let variant = P.get('v') || 'a';
+let state   = P.get('state') || 'generating';
+let device  = 'wide';
+
+const $ = (s) => document.querySelector(s);
+const el = (h) => { const d = document.createElement('div'); d.innerHTML = h.trim(); return d.firstChild; };
+
+// ── 对话内容 ────────────────────────────────────────────
+const avatar = (k, n) => `<div class="av ${k}">${n}</div>`;
+
+const emptyState = () => `
+  <div class="empty">
+    <h1>想做点什么？</h1>
+    <p>描述你想要的网站或工具，Mike 会带着团队把它建出来。<br>
+       不需要写代码，也不需要注册。</p>
+    <div class="ex">
+      <button>${`<span class="ic">📔</span><span>记录每日心情的应用<small>日期、心情等级、备注，数据存在你浏览器里</small></span>`}</button>
+      <button>${`<span class="ic">✅</span><span>一个待办清单<small>可增删、可标记完成、可筛选</small></span>`}</button>
+      <button>${`<span class="ic">📊</span><span>把 CSV 变成图表<small>上传数据，自动生成可视化</small></span>`}</button>
+    </div>
+  </div>`;
+
+const fileTree = (rows) => `
+  <div class="files">
+    <div class="fh">文件 · ${rows.filter(r=>r[1]==='done').length}/${rows.length} 完成</div>
+    ${rows.map(([p,st,sz])=>`<div class="f ${st}">
+      <span class="st">${st==='done'?'✓':st==='writing'?'▶':'·'}</span>
+      <span>${p}</span>${sz?`<span class="sz">${sz}</span>`:''}
+      ${st==='planned'?'<span class="sz">待生成</span>':''}
+    </div>`).join('')}
+  </div>`;
+
+const activity = (lines) => `
+  <details class="act"><summary>▸ 活动日志 · ${lines.length} 条</summary>
+    <div class="body">${lines.map(l=>`<div>${l}</div>`).join('')}</div>
+  </details>`;
+
+const generating = () => {
+  const rows = [
+    ['index.html','done','82B'],
+    ['src/main.tsx','done','241B'],
+    ['src/App.tsx','writing',''],
+    ['src/MoodCard.tsx','planned',''],
+  ];
+  return `
+  <div class="msg me"><div class="who">${avatar('me','你')}你</div>
+    <div class="bub">做一个记录每日心情的应用，要好看的卡片式布局</div></div>
+
+  <div class="msg">
+    <div class="who">${avatar('lead','M')}Mike · 团队负责人</div>
+    <div class="bub">明白了。Emma 已经拆好实现清单，Alex 开始写代码。</div>
+  </div>
+
+  <div class="msg">
+    <div class="who">${avatar('pm','E')}Emma · 产品经理</div>
+    <div class="bub">4 个文件：主页面、入口、应用主体、心情卡片组件。
+      先做最小可用版本——日期选择、心情等级、备注输入、列表展示。</div>
+    ${fileTree(rows)}
+  </div>
+
+  <div class="msg">
+    <div class="who">${avatar('eng','A')}Alex · 工程师
+      <span class="pill run" style="margin-left:auto">正在写代码</span></div>
+    <div class="stream">
+      <div class="hd">▶ 正在写入 src/App.tsx</div>
+      <div class="ln">export default function App() {</div>
+      <div class="ln">  const [moods, setMoods] = useState&lt;Mood[]&gt;([])</div>
+      <div class="ln cur">  return (</div>
+    </div>
+    ${activity([
+      'plan_ready — 文件清单就绪（骨架先行）',
+      'tool_call_start write_file index.html',
+      'tool_result ok',
+      'tool_call_start write_file src/main.tsx',
+      'tool_result ok',
+      'tool_call_start write_file src/App.tsx',
+    ])}
+  </div>`;
+};
+
+const errorState = () => `
+  <div class="msg me"><div class="who">${avatar('me','你')}你</div>
+    <div class="bub">做一个读书笔记应用，要能登录，笔记要能保存到数据库</div></div>
+
+  <div class="msg">
+    <div class="who">${avatar('lead','M')}Mike · 团队负责人</div>
+    <div class="bub">需要数据库和登录。正在准备后端并做安全检查。</div>
+  </div>
+
+  <div class="msg">
+    <div class="who">${avatar('eng','A')}Alex · 工程师</div>
+    <div class="gate">
+      <h4>⚠ 安全检查未通过</h4>
+      <p>检测到一条过宽的数据访问策略，已回滚，<strong>未对外暴露任何数据</strong>。
+         Alex 会重写这部分——安全问题不自动重试，需要你确认后继续。</p>
+      <code>LINT_0024_PERMISSIVE_RLS_POLICY
+table: notes
+policy: notes_select_all — USING (true)</code>
+      <div class="row">
+        <button class="btn primary">让 Alex 重写</button>
+        <button class="btn">查看详情</button>
+      </div>
+    </div>
+    ${activity([
+      'tool_call_start run_migration 001_notes.sql',
+      '平台注入 RLS 模板：ENABLE RLS + REVOKE + workspace_isolation',
+      'gate_started — Security Advisor 扫描',
+      '✗ LINT_0024_PERMISSIVE_RLS_POLICY 检出 → 已回滚',
+    ])}
+  </div>`;
+
+const editing = () => `
+  <div class="msg">
+    <div class="who">${avatar('lead','M')}Mike · 团队负责人</div>
+    <div class="bub">应用已经跑起来了。想改什么直接说。</div>
+  </div>
+
+  <div class="msg me"><div class="who">${avatar('me','你')}你</div>
+    <div class="bub">把卡片改成网格排列，一行三个</div></div>
+
+  <div class="msg">
+    <div class="who">${avatar('eng','A')}Alex · 工程师</div>
+    <div class="bub">只需要改 <code>src/MoodCard.tsx</code> —— 其余文件不动。</div>
+    <div class="stream">
+      <div class="hd">✓ 已写入 src/MoodCard.tsx · 168B</div>
+      <div class="ln">&lt;div className="grid grid-cols-3 gap-4"&gt;</div>
+    </div>
+    <div class="bub" style="margin-top:9px;background:var(--ok-soft);border-color:#bbf7d0">
+      <strong>本轮改了 1 个文件</strong>：src/MoodCard.tsx · 消耗 6 点
+    </div>
+  </div>`;
+
+// ── 生成的假应用 ────────────────────────────────────────
+const appHTML = {
+  wide: `<div class="app"><h2>每日心情</h2>
+    <div class="grid3">
+      <div class="card"><div class="d">8 月 12 日</div><div class="mo">😊</div></div>
+      <div class="card"><div class="d">8 月 13 日</div><div class="mo">😐</div></div>
+      <div class="card"><div class="d">8 月 14 日</div><div class="mo">😄</div></div>
+    </div></div>`,
+  tab: `<div class="app"><h2>每日心情</h2>
+    <div class="grid3">
+      <div class="card"><div class="d">8 月 12 日</div><div class="mo">😊</div></div>
+      <div class="card"><div class="d">8 月 13 日</div><div class="mo">😐</div></div>
+    </div></div>`,
+  mob: `<div class="app"><h2>每日心情</h2>
+    <div class="grid3" style="grid-template-columns:1fr">
+      <div class="card"><div class="d">8 月 12 日</div><div class="mo">😊</div></div>
+    </div></div>`,
+};
+
+// ── 渲染 ────────────────────────────────────────────────
+const STATUS = {
+  empty:      ['<span class="pill">等待输入</span>', ''],
+  generating: ['<span class="pill run">生成中</span>', '<span class="pill">正在写 src/App.tsx</span>'],
+  error:      ['<span class="pill err">需要确认</span>', '<span class="pill">已回滚</span>'],
+  editing:    ['<span class="pill ok">运行中</span>', '<span class="pill">v2</span>'],
+};
+
+const COMPOSER = {
+  empty: `<div class="ta">描述你想做的东西…</div>
+    <div class="ctr">
+      <span class="chip">+ 上传</span><span class="chip">@ 角色</span>
+      <span class="quota">今日额度 <span class="bar"><i style="width:0%"></i></span> 满</span>
+    </div>`,
+  generating: `<div class="ta" style="color:var(--n3)">Alex 正在写代码…</div>
+    <div class="ctr">
+      <span class="chip" style="border-color:#fecaca;color:var(--err)">■ 停止</span>
+      <span class="quota">已冻结 18 点 ·
+        <span class="bar"><i style="width:55%"></i></span></span>
+    </div>`,
+  error: `<div class="ta">描述你想做的东西…</div>
+    <div class="ctr">
+      <span class="chip">+ 上传</span><span class="chip">@ 角色</span>
+      <span class="quota">今日额度 <span class="bar"><i style="width:42%"></i></span> 58%</span>
+    </div>`,
+  editing: `<div class="ta">继续修改…</div>
+    <div class="ctr">
+      <span class="chip">+ 上传</span><span class="chip on">@ Alex</span>
+      <span class="quota">今日额度 <span class="bar"><i style="width:70%"></i></span> 30%</span>
+    </div>`,
+};
+
+function render(){
+  $('#shell').className = 'body ' + variant + (variant==='a' ? ' drawer' : '');
+  $('#screen').className = 'screen ' + device;
+  $('#screen').innerHTML = appHTML[device];
+
+  $('#chatScroll').innerHTML =
+    state === 'empty' ? emptyState() :
+    state === 'generating' ? generating() :
+    state === 'error' ? errorState() : editing();
+
+  $('#composer').innerHTML = COMPOSER[state];
+  const [a,b] = STATUS[state];
+  $('#status').innerHTML = a + (b||'');
+  $('#pvUrl').textContent = state === 'empty' ? '尚未生成' : '3000-ixk2f9.e2b.app';
+  $('#pvBtn').textContent = variant === 'a' ? '预览' : '收起';
+  $('#crumb').textContent = state === 'empty' ? '新项目' : '每日心情记录';
+  document.title = `Forge · ${variant.toUpperCase()} · ${state}`;
+}
+
+// ── 交互 ────────────────────────────────────────────────
+document.querySelectorAll('.switcher button').forEach(b => {
+  b.onclick = () => {
+    if (b.dataset.v){ variant = b.dataset.v;
+      document.querySelectorAll('[data-v]').forEach(x=>x.setAttribute('aria-pressed', x===b)); }
+    if (b.dataset.s){ state = b.dataset.s;
+      document.querySelectorAll('[data-s]').forEach(x=>x.setAttribute('aria-pressed', x===b)); }
+    P.set('v',variant); P.set('state',state);
+    history.replaceState(null,'','?'+P);
+    render();
+  };
+});
+$('#pvBtn').onclick = () => $('#shell').classList.toggle('drawer');
+document.querySelectorAll('[data-dev]').forEach(b => b.onclick = () => {
+  device = b.dataset.dev; render(); });
+
+// 初始化 pressed 状态
+document.querySelectorAll('[data-v]').forEach(x =>
+  x.setAttribute('aria-pressed', x.dataset.v === variant));
+document.querySelectorAll('[data-s]').forEach(x =>
+  x.setAttribute('aria-pressed', x.dataset.s === state));
+render();
+</script>
+</body>
+</html>
