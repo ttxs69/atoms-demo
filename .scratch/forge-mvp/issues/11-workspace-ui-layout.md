@@ -64,10 +64,10 @@ Resolved 2026-09-12。
 
 E2B 的 `getHost(3000)` 返回一个普通 HTTPS URL，作为跨域 iframe 嵌入没有特殊要求。
 
-⚠️ **一条待实测的风险**（无文档依据，不能猜）：E2B 文档没有说明预览 URL 是否设置了
-`X-Frame-Options` 或 CSP `frame-ancestors` 来禁止被嵌入。
-**实现时第一件事就是验证这个**——如果不允许嵌入，B 方案的核心前提就没了，
-只能退化为 A（抽屉）或直接新标签页打开。这是本票唯一的技术不确定性。
+**已验证（2026-09-12）**：`*.e2b.app` 预览 URL 响应头为 `access-control-allow-origin: *`，
+无 `X-Frame-Options`，无 CSP `frame-ancestors`。跨域 iframe 嵌入没有障碍。
+PR #559（`fix-x-frame-to-prevent-clickjacking`）改的是 E2B 自己的控制台（`apps/web/next.config.mjs`），
+与沙箱预览 URL 无关。**B 方案的前提成立，实现时无需回退。**
 
 #### 空状态：三个样例 + 零配额门槛文案
 
@@ -128,14 +128,15 @@ MVP 阶段统一亮色，暗色推到下一轮。
 ### 证据
 
 - `prototypes/ui-layout.html` — 原型本体，三个方案可切换对比
-- <https://docs.e2b.dev/network/public-url> — `getHost(port)` 返回普通 HTTPS URL，
-  文档未提及 iframe 嵌入限制（→ 待实测）
+- <https://docs.e2b.dev/network/public-url> — `getHost(port)` 返回普通 HTTPS URL
+- curl 验证（2026-09-12）：`*.e2b.app` 响应头 `access-control-allow-origin: *`，无 `X-Frame-Options`，无 CSP `frame-ancestors`
+- GitHub e2b-dev/E2B PR #559 — clickjacking 修复针对 `apps/web`（E2B 控制台），不影响沙箱 URL
+- GitHub e2b-dev/E2B issue #539 — 用户在 iframe 里嵌入 E2B 沙箱的 Next.js 应用，E2B 团队确认嵌入本身可行
 - `docs/01-atoms-core-features.md` — Atoms 的日志面板位置（Terminal 而非主视图）
 
 ### 下游影响
 
-- **实现时的第一个动作**：验证 E2B 预览 URL 能否在跨域 iframe 中加载。
-  这决定 B 方案是否成立。
+- ~~**实现时的第一个动作**：验证 E2B 预览 URL 能否在跨域 iframe 中加载~~ — 已验证，可嵌入。
 - **ticket 13（GC）**：本票确认了预览区依赖沙箱运行状态，
   与 ticket 09 的 auto-resume 结论一致——沙箱被 GC 回收后预览 URL 失效，
   用户下次访问会触发 auto-resume（若未 kill）或需要重新生成（若已 kill）。
