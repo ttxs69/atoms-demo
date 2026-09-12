@@ -54,5 +54,6 @@ export interface ModelPort {
   stream(
     agentHandle: AgentHandle,
     messages: readonly (ModelMessage | StepMessage)[],
+    opts?: { signal?: AbortSignal },
   ): AsyncIterable<ModelChunk>;
 }

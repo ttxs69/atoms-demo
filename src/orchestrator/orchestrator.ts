@@ -372,7 +372,7 @@ function parsePlanArgs(raw: string): Plan {
       const stepCalls: ToolCallPart[] = [];
       const stepResults: ToolResultPart[] = [];
 
-      for await (const chunk of deps.model.stream(agentHandle, conversation)) {
+      for await (const chunk of deps.model.stream(agentHandle, conversation, signal ? { signal } : {})) {
         if (signal?.aborted) break;
         switch (chunk.type) {
           case 'text': {

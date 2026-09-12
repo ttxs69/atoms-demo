@@ -109,6 +109,7 @@ class LlmModelAdapter implements ModelPort {
   async *stream(
     agentHandle: AgentHandle,
     messages: readonly (ModelMessage | StepMessage)[],
+    opts?: { signal?: AbortSignal },
   ): AsyncIterable<ModelChunk> {
     const shared = {
       model: this.#model,
@@ -143,6 +144,9 @@ class LlmModelAdapter implements ModelPort {
     const result = streamText({
       ...shared,
       ...(tools ? { tools } : {}),
+      // Hard-cancel the provider call on stop — otherwise the current
+      // model turn runs to completion before the abort checkpoint lands.
+      ...(opts?.signal ? { abortSignal: opts.signal } : {}),
     } as Parameters<typeof streamText>[0]);
 
     for await (const part of result.fullStream) {

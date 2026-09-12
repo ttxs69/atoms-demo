@@ -35,6 +35,7 @@ export class FakeModel implements ModelPort {
   async *stream(
     agentHandle: AgentHandle,
     messages: readonly ModelMessage[],
+    _opts?: { signal?: AbortSignal },
   ): AsyncIterable<ModelChunk> {
     this.calls.push({ agentHandle, messages });
 
