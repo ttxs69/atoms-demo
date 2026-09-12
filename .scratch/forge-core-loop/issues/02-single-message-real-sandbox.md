@@ -13,7 +13,7 @@
 
 **Blocked by:** 01 — 走通骨架：三个端口、事件契约、测试台
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] `POST /api/generate` 接受 `{ sessionId, message }` 并返回 `text/event-stream`
 - [ ] SSE 流把 `ForgeEvent` 序列化后推到浏览器，浏览器能解析回来

@@ -11,7 +11,7 @@
 
 **Blocked by:** None — can start immediately.
 
-**Status:** ready-for-agent
+**Status:** done
 
 状态机（来自原型 `prototypes/generation-loop.mjs`，本票只需建到 `understanding` 为止，
 但类型要能表达完整的图，因为后面的票逐条填这些边）：

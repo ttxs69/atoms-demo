@@ -15,7 +15,7 @@
 
 **Blocked by:** 03 — 生成可跑应用并预览
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] 状态机里有 `gating → gate_failed` 这条边，且**它不通向 `autofixing`**
 - [ ] 门控失败时发出明确的事件，前端展示专属的错误卡片（不是通用错误样式）

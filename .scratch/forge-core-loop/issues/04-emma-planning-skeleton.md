@@ -8,7 +8,7 @@
 
 **Blocked by:** 03 — 生成可跑应用并预览
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] Supervisor（Mike）先调用 Emma，Emma 产出文件清单（文件路径列表）
 - [ ] `plan_ready` 进度事件在 Emma 完成后立刻发出，携带文件列表

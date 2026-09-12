@@ -8,7 +8,7 @@
 
 **Blocked by:** 03 — 生成可跑应用并预览
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] 界面上有明确的导出入口
 - [ ] 从沙箱文件系统打包，浏览器触发下载

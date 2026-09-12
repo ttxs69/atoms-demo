@@ -9,7 +9,7 @@
 
 **Blocked by:** 03 — 生成可跑应用并预览
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] 生成进行中时对话面板有"停止"按钮（仅在生成中状态可见）
 - [ ] 点击停止后 orchestrator 终止当前循环，进入 `interrupted` 状态

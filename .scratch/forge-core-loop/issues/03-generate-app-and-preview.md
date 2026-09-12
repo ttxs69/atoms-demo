@@ -11,7 +11,7 @@ Alex 产出 `package.json`、若干 TypeScript 文件、完成 `npm install`、�
 
 **Blocked by:** 02 — 单条消息写入真实沙箱，双栏结构上线
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] Alex 能产出多文件（至少 `package.json` + 入口 + 主组件），写入沙箱
 - [ ] `npm install` 在沙箱里执行，对话面板里有进度可见

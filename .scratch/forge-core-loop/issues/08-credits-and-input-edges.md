@@ -10,7 +10,7 @@
 
 **Blocked by:** 01 — 走通骨架：三个端口、事件契约、测试台
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] `submitting` 状态下先向额度端口请求预留，预留失败则进入 `blocked_credits`
 - [ ] 进入 `blocked_credits` 时**一次 `write_file` 都没有发生**，沙箱可能都没创建

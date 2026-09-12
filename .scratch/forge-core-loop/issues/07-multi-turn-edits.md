@@ -9,7 +9,7 @@
 
 **Blocked by:** 04 — Emma 先规划，文件树骨架填入
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] 同一会话内可以继续发送消息，走同一条 `Orchestrator.run()` 路径
 - [ ] 第二轮及以后**不触发骨架先行**（不预出文件清单，不显示占位）

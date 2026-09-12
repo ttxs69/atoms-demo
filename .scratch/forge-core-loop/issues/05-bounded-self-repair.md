@@ -9,7 +9,7 @@
 
 **Blocked by:** 03 — 生成可跑应用并预览
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] 构建命令失败时，orchestrator 进入 `autofixing` 状态而不是终止
 - [ ] 错误上下文（报错信息）注入下一轮的 prompt，Alex 看到"上次构建的错误是这个"

@@ -8,7 +8,7 @@
 
 **Blocked by:** 03 — 生成可跑应用并预览
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] 文件树列出沙箱里的项目文件（排除 `node_modules` 等噪声目录）
 - [ ] 点击文件名显示该文件内容
