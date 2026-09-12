@@ -45,6 +45,13 @@ export class FakeSandbox implements SandboxPort {
     fs.set(path, content);
   }
 
+  async listFiles(sandboxId: string, dir: string): Promise<string[]> {
+    const prefix = dir.endsWith('/') ? dir : `${dir}/`;
+    return [...(this.files.get(sandboxId)?.keys() ?? [])]
+      .filter((p) => p.startsWith(prefix))
+      .sort();
+  }
+
   async readFile(sandboxId: string, path: string): Promise<string> {
     const content = this.files.get(sandboxId)?.get(path);
     if (content === undefined) throw new Error(`no such file: ${path}`);

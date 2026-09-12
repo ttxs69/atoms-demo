@@ -480,3 +480,70 @@ details.activity .log {
   border-radius: var(--r);
   padding: 6px 10px;
 }
+
+/* Code viewer (ticket 09) -------------------------------------------------- */
+.code-viewer {
+  display: flex;
+  width: 100%;
+  min-height: 0;
+  background: #fff;
+  border: 1px solid var(--n2);
+  border-radius: var(--r);
+  overflow: hidden;
+}
+.code-tree {
+  width: 220px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--n2);
+  overflow-y: auto;
+  padding: 6px;
+}
+.code-tree-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font-family: var(--mono);
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: 5px;
+  color: var(--n5);
+}
+.code-tree-item:hover {
+  background: var(--n1);
+}
+.code-tree-item.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.code-content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.code-path {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--n4);
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--n1);
+  background: var(--n0);
+}
+.code-body {
+  flex: 1;
+  overflow: auto;
+  margin: 0;
+  padding: 10px 12px;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--n6);
+}
+.tok-str { color: #0a7d33; }
+.tok-com { color: var(--n3); font-style: italic; }
+.tok-kw { color: #7c3aed; }
+.code-empty {
+  color: var(--n3);
+  font-size: 13px;
+  padding: 20px;
+}

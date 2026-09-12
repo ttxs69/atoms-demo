@@ -57,6 +57,29 @@ function extractPath(argsSoFar: string): string | null {
   }
 }
 
+/**
+ * A tiny zero-dependency highlighter: escape everything first, then color
+ * comments, strings, and common keywords for ts/tsx/css/json/html files.
+ * Deliberately not a real tokenizer — good enough to read code by.
+ * Input is ESCAPED before any span is inserted, so the spans themselves
+ * are the only HTML in the output.
+ */
+function highlight(source: string, path: string): string {
+  const esc = source.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const lang = /\.css$/.test(path) ? 'css' : /\.json$/.test(path) ? 'json' : /\.html$/.test(path) ? 'html' : 'ts';
+  const keywords =
+    lang === 'css'
+      ? 'important'
+      : lang === 'json'
+        ? 'true|false|null'
+        : 'const|let|var|function|return|if|else|for|while|import|from|export|default|type|interface|extends|new|async|await|class|try|catch|switch|case|break|null|undefined|true|false';
+  return esc
+    .replace(/(&quot;|"|')(?:\\.|(?!\1)[^\\\n])*\1/g, (m) => `<span class="tok-str">${m}</span>`)
+    .replace(/\/\/[^\n]*/g, (m) => `<span class="tok-com">${m}</span>`)
+    .replace(/\/\*[\s\S]*?\*\//g, (m) => `<span class="tok-com">${m}</span>`)
+    .replace(new RegExp(`\\b(${keywords})\\b`, 'g'), (m) => `<span class="tok-kw">${m}</span>`);
+}
+
 /** "4 个文件 · 已完成 1 · 正在写第 2 个" — real progress, not a fake bar. */
 function progressText(files: FileEntry[]): string {
   const done = files.filter((f) => f.state === 'done').length;
@@ -75,6 +98,9 @@ export function Workspace() {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewNonce, setPreviewNonce] = useState(0);
   const [stopped, setStopped] = useState(false);
+  const [pane, setPane] = useState<'preview' | 'code'>('preview');
+  const [codeFiles, setCodeFiles] = useState<string[]>([]);
+  const [codeFile, setCodeFile] = useState<{ path: string; content: string } | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const [device, setDevice] = useState<'desktop' | 'tablet' | 'mobile'>('desktop');
   // The workspace file tree — skeleton-first: filled by plan_ready, then each
@@ -263,6 +289,30 @@ export function Workspace() {
           return prev;
       }
     });
+  }, []);
+
+  const openCodePane = useCallback(async () => {
+    setPane('code');
+    setCodeFile(null);
+    try {
+      const res = await fetch(`/api/files?session=${encodeURIComponent(sessionIdRef.current)}`);
+      const data = (await res.json()) as { files?: string[]; error?: string };
+      setCodeFiles(data.files ?? []);
+    } catch {
+      setCodeFiles([]);
+    }
+  }, []);
+
+  const openFile = useCallback(async (path: string) => {
+    try {
+      const res = await fetch(
+        `/api/files?session=${encodeURIComponent(sessionIdRef.current)}&path=${encodeURIComponent(path)}`,
+      );
+      const data = (await res.json()) as { content?: string; error?: string };
+      if (typeof data.content === 'string') setCodeFile({ path, content: data.content });
+    } catch {
+      /* leave the previous file shown */
+    }
   }, []);
 
   const submit = useCallback(async () => {
@@ -517,6 +567,22 @@ export function Workspace() {
           <div className="preview-bar">
             <button
               type="button"
+              className={`btn small ${pane === 'preview' ? 'primary' : ''}`}
+              onClick={() => setPane('preview')}
+            >
+              预览
+            </button>
+            <button
+              type="button"
+              className={`btn small ${pane === 'code' ? 'primary' : ''}`}
+              onClick={() => void openCodePane()}
+            >
+              代码
+            </button>
+            {pane === 'preview' ? (
+              <>
+            <button
+              type="button"
               className={`btn small ${device === 'desktop' ? 'primary' : ''}`}
               onClick={() => setDevice('desktop')}
             >
@@ -536,6 +602,8 @@ export function Workspace() {
             >
               手机
             </button>
+              </>
+            ) : null}
             <div className="spacer" />
             {previewUrl ? (
               <a className="pill" href={previewUrl} target="_blank" rel="noopener noreferrer">
@@ -546,7 +614,38 @@ export function Workspace() {
             )}
           </div>
           <div className="preview-stage">
-            {previewUrl ? (
+            {pane === 'code' ? (
+              <div className="code-viewer">
+                <div className="code-tree">
+                  {codeFiles.length === 0 ? (
+                    <div className="code-empty">还没有生成文件</div>
+                  ) : (
+                    codeFiles.map((f) => (
+                      <button
+                        type="button"
+                        key={f}
+                        className={`code-tree-item ${codeFile?.path === f ? 'active' : ''}`}
+                        onClick={() => void openFile(f)}
+                      >
+                        {f}
+                      </button>
+                    ))
+                  )}
+                </div>
+                <div className="code-content">
+                  {codeFile ? (
+                    <>
+                      <div className="code-path">{codeFile.path} · 只读</div>
+                      <pre className="code-body">
+                        <code dangerouslySetInnerHTML={{ __html: highlight(codeFile.content, codeFile.path) }} />
+                      </pre>
+                    </>
+                  ) : (
+                    <div className="code-empty">选择左侧文件查看内容</div>
+                  )}
+                </div>
+              </div>
+            ) : previewUrl ? (
               <div className={`device device-${device}`}>
                 <iframe
                   key={`${previewUrl}-${previewNonce}`}

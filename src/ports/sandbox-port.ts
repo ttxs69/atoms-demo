@@ -11,6 +11,8 @@ export interface SandboxPort {
   create(workspaceId: string): Promise<string>; // returns sandboxId
   writeFile(sandboxId: string, path: string, content: string): Promise<void>;
   readFile(sandboxId: string, path: string): Promise<string>;
+  /** Relative paths under a directory, no noise (node_modules excluded). */
+  listFiles(sandboxId: string, dir: string): Promise<string[]>;
   runCommand(
     sandboxId: string,
     cmd: string,

@@ -52,6 +52,22 @@ export class E2BSandboxAdapter implements SandboxPort {
     await sandbox.files.write(path, content);
   }
 
+  async listFiles(sandboxId: string, dir: string): Promise<string[]> {
+    const sandbox = await this.#connect(sandboxId);
+    const entries = await sandbox.files.list(dir);
+    const out: string[] = [];
+    for (const entry of entries) {
+      if (entry.type === 'dir') {
+        if (entry.name === 'node_modules' || entry.name === '.git') continue;
+        const nested = await this.listFiles(sandboxId, `${dir}/${entry.name}`.replace('//', '/'));
+        out.push(...nested);
+      } else {
+        out.push(`${dir}/${entry.name}`.replace('//', '/'));
+      }
+    }
+    return out;
+  }
+
   async readFile(sandboxId: string, path: string): Promise<string> {
     const sandbox = await this.#connect(sandboxId);
     // The default overload returns text; naming the format keeps that true
