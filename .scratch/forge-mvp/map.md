@@ -145,6 +145,39 @@
   可观测性 = Railway 内置日志 + ticket 07 管理页加一栏最近错误，不引入 Sentry。
   **`docs/03-architecture.md` 大半已失效**（k8s / 自研 BaaS / WebContainer 三个前提都被推翻），实现时需重写
 
+## Handoff to `/to-spec`
+
+地图已走完（14/14 resolved），**交棒给 `/to-spec`，不在本地图里写实现**。
+以下两条是 2026-09-12 敲定的交棒参数。
+
+### spec 切分：按四组切 4 个 spec
+
+ticket 10 的 25 项必做清单按四组切开，各自一个 spec + 一套实现票。
+**不复用 `forge-mvp` 这个 slug**——那个目录里 01–14 是决策票，实现票会撞号混淆。
+
+| slug | 项数 | 内容 | 依赖 |
+|---|---|---|---|
+| `forge-core-loop` | 12 | 沙箱生命周期 / Mastra supervisor + 3 角色 / 有界自修复 / SSE ForgeEvent / 对话面板 / 预览 iframe / 代码查看器 / 多轮修改 / 导出 zip / 错误 UX | — |
+| `forge-accounts` | 7 | 匿名认证 + Turnstile / 额度原子预扣结算 / 每日重置 / 动态渲染 / `Sb-Forwarded-For` / 账户升级 / 管理面板 | core-loop（要有生成动作才能计量） |
+| `forge-app-backend` | 4 | Supabase 项目 provision / RLS 模板门控 / `publishable` key 注入 / 生成应用的 Auth | core-loop（沙箱） |
+| `forge-gc` | 2 | 沙箱 GC / 匿名用户 GC + `deletion_queue` | 前三组（要有东西可回收） |
+
+按上表顺序做。每个 spec 落 `.scratch/<slug>/spec.md`，
+实现票落 `.scratch/<slug>/issues/NN-<slug>.md`（各自从 01 起编号）。
+
+### 代码落点：同一个仓库
+
+应用代码直接建在 `atoms_demo/` 里，与设计产物并存。
+理由：`CONTEXT.md`（术语表）和本地图就在手边，`/code-review` 的 Spec 轴
+可以直接对照决策票，不需要跨仓库引用。
+
+### 交棒前已就位
+
+- `CONTEXT.md` — 术语表，六组术语的唯一定义源
+- `docs/03-architecture.md` — 顶部已加失效横幅（四条前提被推翻，指向本地图）
+- `prototypes/ui-layout.html` — 布局原型，作为一手来源保留
+- 仓库干净，全部已推送
+
 ## Not yet specified
 
 - **生成内容的滥用检测** —— 终点是"陌生人公开生成"，意味着有人会生成钓鱼页、挖矿脚本。
