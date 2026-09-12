@@ -1,6 +1,7 @@
 # forge-core-loop — 生成循环闭环
 
 Status: ready-for-agent
+实现票：`.scratch/forge-core-loop/issues/`（13 张，已切分）
 来源：`.scratch/forge-mvp/map.md`（wayfinder，14/14 resolved）
 术语：严格遵守 `CONTEXT.md`。特别是 **Workspace ≠ project**、**Gate 不自动重试**、
 **Credit 是外部抽象、内部是精确计量**。
