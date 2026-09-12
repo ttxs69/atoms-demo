@@ -22,11 +22,26 @@ const UNMETERED_CREDITS: CreditsPort = {
 
 const MAX_MESSAGE_LENGTH = 4000;
 
-export async function POST(request: Request): Promise<Response> {
-  const e2bKey = process.env['E2B_API_KEY'];
-  const anthropicKey = process.env['ANTHROPIC_API_KEY'];
+/**
+ * The orchestrator is a module-level singleton so `sandboxBySession` (inside
+ * `createOrchestrator`) survives across HTTP requests in the same process.
+ *
+ * We read env vars here, at module initialization. If they are missing the
+ * first POST will return 503, but the orchestrator object still exists as a
+ * shell — the adapters never call E2B/Anthropic unless a request arrives.
+ *
+ * This is sufficient for Railway's single long-running process (ticket 14).
+ * A real deployment will eventually persist sandbox ids in Postgres
+ * alongside the session row (ticket 08) so restarts do not lose state.
+ */
+const orchestrator = createOrchestrator({
+  sandbox: new E2BSandboxAdapter(process.env['E2B_API_KEY'] ?? ''),
+  model: new AnthropicModelAdapter(process.env['ANTHROPIC_API_KEY'] ?? ''),
+  credits: UNMETERED_CREDITS,
+});
 
-  if (!e2bKey || !anthropicKey) {
+export async function POST(request: Request): Promise<Response> {
+  if (!process.env['E2B_API_KEY'] || !process.env['ANTHROPIC_API_KEY']) {
     return Response.json(
       { error: 'Server is missing E2B_API_KEY or ANTHROPIC_API_KEY.' },
       { status: 503 },
@@ -49,7 +64,6 @@ export async function POST(request: Request): Promise<Response> {
     return Response.json({ error: 'sessionId is required.' }, { status: 400 });
   }
   if (typeof message !== 'string' || message.trim().length === 0) {
-    // A blank prompt must not count as a generation.
     return Response.json({ error: 'message cannot be empty.' }, { status: 400 });
   }
   if (message.length > MAX_MESSAGE_LENGTH) {
@@ -58,12 +72,6 @@ export async function POST(request: Request): Promise<Response> {
       { status: 400 },
     );
   }
-
-  const orchestrator = createOrchestrator({
-    sandbox: new E2BSandboxAdapter(e2bKey),
-    model: new AnthropicModelAdapter(anthropicKey),
-    credits: UNMETERED_CREDITS,
-  });
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({

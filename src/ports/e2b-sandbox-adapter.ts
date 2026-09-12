@@ -33,13 +33,13 @@ export class E2BSandboxAdapter implements SandboxPort {
   }
 
   async writeFile(sandboxId: string, path: string, content: string): Promise<void> {
-    const sandbox = await Sandbox.connect(sandboxId, { apiKey: this.#apiKey });
+    const sandbox = await this.#connect(sandboxId);
     await sandbox.files.write(path, content);
   }
 
   async readFile(sandboxId: string, path: string): Promise<string> {
-    const sandbox = await Sandbox.connect(sandboxId, { apiKey: this.#apiKey });
-    // The default overload returns text; the explicit format keeps that true
+    const sandbox = await this.#connect(sandboxId);
+    // The default overload returns text; naming the format keeps that true
     // even if the SDK's default ever changes.
     return await sandbox.files.read(path, { format: 'text' });
   }
@@ -48,7 +48,7 @@ export class E2BSandboxAdapter implements SandboxPort {
     sandboxId: string,
     cmd: string,
   ): Promise<{ exitCode: number; output: string }> {
-    const sandbox = await Sandbox.connect(sandboxId, { apiKey: this.#apiKey });
+    const sandbox = await this.#connect(sandboxId);
     const result = await sandbox.commands.run(cmd);
     return {
       exitCode: result.exitCode,
@@ -57,18 +57,27 @@ export class E2BSandboxAdapter implements SandboxPort {
   }
 
   async pause(sandboxId: string): Promise<void> {
-    const sandbox = await Sandbox.connect(sandboxId, { apiKey: this.#apiKey });
+    const sandbox = await this.#connect(sandboxId);
     await sandbox.pause();
   }
 
   async resume(sandboxId: string): Promise<string> {
-    // E2B auto-resumes on connect; this explicit call is used by the orchestrator
-    // when it needs to confirm the sandbox is running before surfacing a URL.
-    const sandbox = await Sandbox.connect(sandboxId, { apiKey: this.#apiKey });
+    // E2B auto-resumes on connect; this explicit call lets the orchestrator
+    // confirm the sandbox is running before surfacing a preview URL.
+    const sandbox = await this.#connect(sandboxId);
     return sandbox.sandboxId;
   }
 
   async kill(sandboxId: string): Promise<void> {
     await Sandbox.kill(sandboxId, { apiKey: this.#apiKey });
+  }
+
+  /**
+   * Connecting is how every operation other than create/kill begins, and
+   * `connect()` is also what extends a sandbox's lifetime. Keeping it in one
+   * place means the lifetime semantics are stated once.
+   */
+  async #connect(sandboxId: string) {
+    return await Sandbox.connect(sandboxId, { apiKey: this.#apiKey });
   }
 }

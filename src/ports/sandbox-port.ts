@@ -16,6 +16,7 @@ export interface SandboxPort {
     cmd: string,
   ): Promise<{ exitCode: number; output: string }>;
   pause(sandboxId: string): Promise<void>;
-  resume(sandboxId: string): Promise<string>; // returns sandboxId
+  /** Returns the id the sandbox ended up with. */
+  resume(sandboxId: string): Promise<string>;
   kill(sandboxId: string): Promise<void>;
 }

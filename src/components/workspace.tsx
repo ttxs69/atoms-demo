@@ -62,93 +62,96 @@ export function Workspace() {
     setLog((prev) => [...prev, JSON.stringify(event)]);
 
     setMessages((prev) => {
-      const next = [...prev];
-      const currentAgent = (): AgentMessage | null => {
-        for (let i = next.length - 1; i >= 0; i -= 1) {
-          const candidate = next[i];
-          if (candidate?.kind === 'agent') return candidate;
+      // Never mutate objects from the previous render — React (especially
+      // StrictMode, which Next dev mode enables) double-invokes updater
+      // functions. Every branch must return a structurally-new message array
+      // with a new object for any message that changed.
+      const lastAgentIndex = (() => {
+        for (let i = prev.length - 1; i >= 0; i -= 1) {
+          if (prev[i]?.kind === 'agent') return i;
         }
-        return null;
+        return -1;
+      })();
+
+      const updateLast = (fn: (message: AgentMessage) => AgentMessage): Message[] => {
+        if (lastAgentIndex === -1) return prev;
+        return prev.map((message, index) =>
+          index === lastAgentIndex && message.kind === 'agent' ? fn(message) : message,
+        );
       };
 
       switch (event.type) {
-        case 'agent_started': {
-          next.push({
-            kind: 'agent',
-            messageId: event.messageId,
-            agentHandle: event.agentHandle,
-            text: '',
-            files: [],
-            errors: [],
-          });
-          break;
-        }
+        case 'agent_started':
+          return [
+            ...prev,
+            {
+              kind: 'agent',
+              messageId: event.messageId,
+              agentHandle: event.agentHandle,
+              text: '',
+              files: [],
+              errors: [],
+            },
+          ];
 
-        case 'text_delta': {
-          const message = currentAgent();
-          if (message) message.text += event.delta;
-          break;
-        }
+        case 'text_delta':
+          return updateLast((message) => ({ ...message, text: message.text + event.delta }));
 
         case 'tool_call_start': {
-          const message = currentAgent();
-          if (message) {
-            toolArgsRef.current.set(event.toolCallId, '');
-            message.files = [
+          toolArgsRef.current.set(event.toolCallId, '');
+          return updateLast((message) => ({
+            ...message,
+            files: [
               ...message.files,
               { toolCallId: event.toolCallId, path: null, bytes: null, state: 'writing' },
-            ];
-          }
-          break;
+            ],
+          }));
         }
 
         case 'tool_input_delta': {
-          const buffered = (toolArgsRef.current.get(event.toolCallId) ?? '') + event.argsDelta;
+          const buffered =
+            (toolArgsRef.current.get(event.toolCallId) ?? '') + event.argsDelta;
           toolArgsRef.current.set(event.toolCallId, buffered);
-
-          const message = currentAgent();
           const path = extractPath(buffered);
-          if (message && path) {
-            message.files = message.files.map((file) =>
+          if (!path) return prev;
+          return updateLast((message) => ({
+            ...message,
+            files: message.files.map((file) =>
               file.toolCallId === event.toolCallId && file.path === null
                 ? { ...file, path }
                 : file,
-            );
-          }
-          break;
+            ),
+          }));
         }
 
         case 'tool_result': {
-          const message = currentAgent();
           const result = event.result as { path?: string; bytes?: number } | null;
-          if (message) {
-            message.files = message.files.map((file) =>
+          return updateLast((message) => ({
+            ...message,
+            files: message.files.map((file) =>
               file.toolCallId === event.toolCallId
                 ? {
                     ...file,
-                    state: 'done',
+                    state: 'done' as const,
                     path: result?.path ?? file.path,
                     bytes: result?.bytes ?? file.bytes,
                   }
                 : file,
-            );
-          }
-          break;
+            ),
+          }));
         }
 
-        case 'error': {
-          const message = currentAgent();
-          if (message) message.errors = [...message.errors, event.message];
-          break;
-        }
+        case 'error':
+          return updateLast((message) => ({
+            ...message,
+            errors: [...message.errors, event.message],
+          }));
 
         default:
           // Transient progress events are logged but have no home in the
           // message list until later tickets render them.
-          break;
+          return prev;
       }
-
-      return next;
     });
   }, []);
 
