@@ -1,4 +1,4 @@
-import type { CreditsPort } from '../../src/ports/ports.ts';
+import type { CreditsPort } from '../../src/ports/credits-port.ts';
 
 /**
  * Two-phase credit accounting, in memory.

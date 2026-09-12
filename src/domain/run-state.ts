@@ -51,7 +51,7 @@ export const RUN_TRANSITIONS: Readonly<Record<RunState, readonly RunState[]>> = 
   understanding: ['planning'],
   // Second round onward goes straight to `building`, skipping dependency
   // installation when no new dependencies were introduced.
-  planning: ['generating', 'building'],
+  planning: ['generating'],
   generating: ['installing', 'building', 'interrupted'],
   interrupted: ['understanding'],
   installing: ['migrating', 'building'],

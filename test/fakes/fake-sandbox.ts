@@ -1,4 +1,4 @@
-import type { SandboxPort } from '../../src/ports/ports.ts';
+import type { SandboxPort } from '../../src/ports/sandbox-port.ts';
 
 /**
  * A sandbox that holds a real in-memory filesystem.

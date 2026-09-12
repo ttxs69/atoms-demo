@@ -1,0 +1,21 @@
+/**
+ * Port: the sandbox.
+ *
+ * Wraps all E2B calls. Orchestrator never imports the E2B SDK directly.
+ *
+ * Note: every sandbox created in production must carry
+ * `metadata: { workspace_id }` so GC can locate it via `Sandbox.list()`.
+ * The sandbox implementation, not this interface, is responsible for that.
+ */
+export interface SandboxPort {
+  create(workspaceId: string): Promise<string>; // returns sandboxId
+  writeFile(sandboxId: string, path: string, content: string): Promise<void>;
+  readFile(sandboxId: string, path: string): Promise<string>;
+  runCommand(
+    sandboxId: string,
+    cmd: string,
+  ): Promise<{ exitCode: number; output: string }>;
+  pause(sandboxId: string): Promise<void>;
+  resume(sandboxId: string): Promise<string>; // returns sandboxId
+  kill(sandboxId: string): Promise<void>;
+}

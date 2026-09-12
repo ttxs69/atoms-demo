@@ -1,6 +1,8 @@
 import type { AgentHandle } from '../domain/roles.ts';
 import type { ForgeEvent } from '../domain/events.ts';
-import type { CreditsPort, ModelMessage, ModelPort, SandboxPort } from '../ports/ports.ts';
+import type { CreditsPort } from '../ports/credits-port.ts';
+import type { ModelMessage, ModelPort } from '../ports/model-port.ts';
+import type { SandboxPort } from '../ports/sandbox-port.ts';
 
 export interface OrchestratorDeps {
   sandbox: SandboxPort;
@@ -47,5 +49,3 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     },
   };
 }
-
-export type { AgentHandle };

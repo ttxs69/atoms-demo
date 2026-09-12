@@ -1,5 +1,5 @@
 import type { AgentHandle } from '../../src/domain/roles.ts';
-import type { ModelChunk, ModelMessage, ModelPort } from '../../src/ports/ports.ts';
+import type { ModelChunk, ModelMessage, ModelPort } from '../../src/ports/model-port.ts';
 
 /** A scripted turn: the chunks one agent yields when called once. */
 export type ScriptedTurn = readonly ModelChunk[];

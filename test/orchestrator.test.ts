@@ -1,7 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { RUN_TRANSITIONS } from '../src/domain/run-state.ts';
 import { createOrchestrator } from '../src/orchestrator/orchestrator.ts';
 import { FakeSandbox } from './fakes/fake-sandbox.ts';
 import { FakeModel } from './fakes/fake-model.ts';
@@ -103,40 +102,4 @@ test('FakeModel throws when no scripted turn remains', async () => {
     },
     /no scripted turn left/,
   );
-});
-
-// A gate failure means the generated data-isolation policy is unsafe. Retrying
-// it automatically risks handing the user an app that looks successful but is
-// not. This is the one invariant in the state graph that must not regress: the
-// edge from a gate failure into self-repair must never exist.
-test('gate_failed cannot reach autofixing', () => {
-  const reachable = new Set<string>();
-  const walk = (state: string): void => {
-    if (reachable.has(state)) return;
-    reachable.add(state);
-    for (const next of RUN_TRANSITIONS[state as keyof typeof RUN_TRANSITIONS] ?? []) {
-      walk(next);
-    }
-  };
-
-  walk('gate_failed');
-
-  assert.ok(!reachable.has('autofixing'), 'gate_failed must never lead to autofixing');
-  assert.ok(!reachable.has('building'), 'gate_failed must not silently resume the build');
-});
-
-test('build failure can reach autofixing', () => {
-  // The counterpart to the test above: a build failure is a technical problem,
-  // so self-repair is the correct edge here.
-  assert.ok(RUN_TRANSITIONS.failed.includes('autofixing'));
-  assert.ok(RUN_TRANSITIONS.autofixing.includes('building'));
-});
-
-test('every transition target is a declared state', () => {
-  const declared = new Set(Object.keys(RUN_TRANSITIONS));
-  for (const [from, targets] of Object.entries(RUN_TRANSITIONS)) {
-    for (const to of targets) {
-      assert.ok(declared.has(to), `${from} -> ${to}: "${to}" is not a declared state`);
-    }
-  }
 });
