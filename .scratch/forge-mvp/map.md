@@ -85,25 +85,22 @@
   **发布产物放独立注册域下的子域**（形如 `abc123.forge-app.com`），
   按注册域切断 cookie 作用域；威胁模型随之从访客侧回到平台侧
 
-- [Orchestrator 接口](issues/06-orchestrator-interface.md) — **Mastra** 作为框架（其 `AgentNetwork`
-  已 deprecated，官方改推 supervisor 模式，我们直接采用）；一个角色 = 一个 Agent 实例
-  （instructions + tools 白名单 + model）；共享 message history 不做隔离；
-  **并行按操作类别分区**：只读分析类自由并行，设计推理类（`@pm`/`@arch`）串行、保持两个角色不合并，
-  写入单写者；冲突由 Mike 汇总后呈现两个意见并给出推荐，不自动裁决；
-  **生成协议改用原生 tool call**（撤回 bolt.new XML 方案）；SSE 事件流带 `agentHandle` 分路
-
-## Not yet specified
+- [平台账号与用量限制](issues/07-accounts-and-usage-limits.md) — **「陌生人公开访问」 = 访问成果与生成能力都开放**；
+  Supabase Auth 匿名登录作为身份锚点（JWT 带 `is_anonymous`，可升级为永久账户）；
+  内部 token 精确计量 / 外部抽象点数展示；**预扣+结算必须数据库原子**（行锁 + 幂等键）；
+  防刷三层：Supabase 自带 IP 限流 30/时 + Turnstile invisible + 额度按 `userId` 分桶；
+  额度耗尽硬拦截并给出下一步；每日重置不累积；匿名用户 30 天无活动清理。
+  情景约束：认证页必须动态渲染（局 Next.js 静态缓存安全隐患）；代理后面需 `Sb-Forwarded-For` + secret key
 
 - **生成内容的滥用检测** —— 终点是"陌生人公开生成"，意味着有人会生成钓鱼页、挖矿脚本。
   检测放在生成时还是发布时？靠模型自查还是规则？目前还看不清该问什么。
   改用 E2B 后这件事**变重了**：代码在我们的机器上跑，滥用是我们的账单和我们的 IP 声誉
-- **沙箱回收策略** —— E2B 的 paused 沙箱无 TTL、不自动删除，只有显式 `kill()` 才释放。
-  Hobby 层 10 GiB 存储会被无限累积占满。什么条件下回收、回收前是否通知用户、
-  用户如何取回工作成果 —— 等 MVP 范围裁剪定了留存承诺再具体化
+- ~~沙箱回收策略~~ —— 已 graduate 为独立 ticket「资源 GC 策略」
 - **出站控制与资源配额** —— 风险回到平台侧后重新出现。E2B 支持 per-sandbox egress 控制，
   但要控到什么程度取决于滥用检测的结论
 - 自定义域名是否纳入本地图
-- LLM 账单的成本归因与防刷机制（与「平台账号与用量限制」有重叠，等那张票落地后再看是否需要独立成票）
+- ~~LLM 账单的成本归因与防刷机制~~ —— 已在「平台账号与用量限制」中解决
+  （数据库原子预扣+结算、幂等键、三层防刷）
 - 生成的代码如何交付给用户（下载 zip / 接 GitHub / 留在平台）
 - **只读并行的并发上限** —— 只读 agent 不占沙箱，受限的是 LLM API rate limit 而非 E2B 的 20 并发。
   这个数字要等实测，现在填不出来
