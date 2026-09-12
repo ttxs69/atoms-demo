@@ -9,10 +9,23 @@
   "scripts": {
     "test": "node --test 'test/**/*.test.ts'",
     "test:watch": "node --test --watch 'test/**/*.test.ts'",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "build": "next build",
+    "dev": "next dev --turbopack"
   },
   "devDependencies": {
     "@types/node": "^22.20.2",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
     "typescript": "5.9.2"
+  },
+  "dependencies": {
+    "@ai-sdk/anthropic": "^2.0.102",
+    "ai": "^7.0.99",
+    "e2b": "^2.49.1",
+    "next": "^15.3.5",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "zod": "^4.6.2"
   }
 }

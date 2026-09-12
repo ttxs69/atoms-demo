@@ -50,3 +50,9 @@ export type TransientEvent =
   | { type: 'plan_ready'; files: readonly string[] }
   | { type: 'gate_started'; gate: string }
   | { type: 'sandbox_state'; state: 'booting' | 'resuming' | 'ready' | 'paused' };
+
+/**
+ * Everything that travels to the browser: durable events plus transient
+ * progress. The transport carries both; only `ForgeEvent`s are persisted.
+ */
+export type StreamEvent = ForgeEvent | TransientEvent;

@@ -16,7 +16,7 @@ async function collect(stream: AsyncIterable<ForgeEvent>): Promise<ForgeEvent[]>
 test('run() streams agent_started then text_delta then agent_done', async () => {
   const orchestrator = createOrchestrator({
     sandbox: new FakeSandbox(),
-    model: new FakeModel({ lead: [[{ type: 'text', delta: 'Got it.' }]] }),
+    model: new FakeModel({ eng: [[{ type: 'text', delta: 'Got it.' }]] }),
     credits: new FakeCredits(),
   });
 
@@ -28,11 +28,94 @@ test('run() streams agent_started then text_delta then agent_done', async () => 
   );
 });
 
+test('run() executes write_file so the file actually lands in the sandbox', async () => {
+  const sandbox = new FakeSandbox();
+  const orchestrator = createOrchestrator({
+    sandbox,
+    model: new FakeModel({
+      eng: [
+        [
+          { type: 'tool_call_start', toolCallId: 't1', toolName: 'write_file' },
+          { type: 'tool_input_delta', toolCallId: 't1', argsDelta: '{"path":"index.html",' },
+          { type: 'tool_input_delta', toolCallId: 't1', argsDelta: '"content":"<h1>hi</h1>"}' },
+          { type: 'tool_call_end', toolCallId: 't1' },
+        ],
+      ],
+    }),
+    credits: new FakeCredits(),
+  });
+
+  await collect(orchestrator.run('session-1', 'make a hello page'));
+
+  assert.deepEqual(sandbox.allPaths(), ['index.html']);
+  const sandboxId = [...sandbox.files.keys()][0]!;
+  assert.equal(await sandbox.readFile(sandboxId, 'index.html'), '<h1>hi</h1>');
+});
+
+test('run() emits tool events around a write_file call', async () => {
+  const orchestrator = createOrchestrator({
+    sandbox: new FakeSandbox(),
+    model: new FakeModel({
+      eng: [
+        [
+          { type: 'tool_call_start', toolCallId: 't1', toolName: 'write_file' },
+          { type: 'tool_input_delta', toolCallId: 't1', argsDelta: '{"path":"a.txt","content":"x"}' },
+          { type: 'tool_call_end', toolCallId: 't1' },
+        ],
+      ],
+    }),
+    credits: new FakeCredits(),
+  });
+
+  const events = await collect(orchestrator.run('session-1', 'go'));
+
+  assert.deepEqual(
+    events.map((event) => event.type),
+    ['agent_started', 'tool_call_start', 'tool_input_delta', 'tool_result', 'agent_done'],
+  );
+});
+
+test('run() reuses one sandbox across turns in the same session', async () => {
+  const sandbox = new FakeSandbox();
+  const orchestrator = createOrchestrator({
+    sandbox,
+    model: new FakeModel({
+      eng: [[{ type: 'text', delta: 'one' }], [{ type: 'text', delta: 'two' }]],
+    }),
+    credits: new FakeCredits(),
+  });
+
+  await collect(orchestrator.run('session-1', 'first'));
+  await collect(orchestrator.run('session-1', 'second'));
+
+  assert.equal(sandbox.files.size, 1);
+});
+
+test('run() emits an error event when tool arguments are malformed', async () => {
+  const orchestrator = createOrchestrator({
+    sandbox: new FakeSandbox(),
+    model: new FakeModel({
+      eng: [
+        [
+          { type: 'tool_call_start', toolCallId: 't1', toolName: 'write_file' },
+          { type: 'tool_input_delta', toolCallId: 't1', argsDelta: '{"path": truncated' },
+          { type: 'tool_call_end', toolCallId: 't1' },
+        ],
+      ],
+    }),
+    credits: new FakeCredits(),
+  });
+
+  const events = await collect(orchestrator.run('session-1', 'go'));
+
+  assert.ok(events.some((event) => event.type === 'error'));
+});
+
 test('run() produces the same event sequence on repeated calls with the same script', async () => {
   function makeOrchestrator() {
     return createOrchestrator({
       sandbox: new FakeSandbox(),
-      model: new FakeModel({ lead: [[{ type: 'text', delta: 'Hello.' }]] }),
+      model: new FakeModel({ eng: [[{ type: 'text', delta: 'Hello.' }]] }),
       credits: new FakeCredits(),
     });
   }
