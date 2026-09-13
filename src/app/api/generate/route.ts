@@ -3,6 +3,7 @@ import { E2BSandboxAdapter } from '../../../ports/e2b-sandbox-adapter.ts';
 import { createModelAdapter } from '../../../ports/llm-model-adapter.ts';
 import { encodeEvent } from '../../../transport/sse.ts';
 import { keyFor, ledgerPort, requestScopedCredits, withRequestKey } from '../../../credits/route-credits.ts';
+import { sessionVerifierFromEnv } from '../../../auth/session.ts';
 
 export const runtime = 'nodejs';
 
@@ -37,13 +38,6 @@ function buildOrchestrator() {
 }
 
 export async function POST(request: Request): Promise<Response> {
-  if (!process.env['E2B_API_KEY'] || !process.env['LLM_API_KEY']) {
-    return Response.json(
-      { error: 'Server is missing E2B_API_KEY or LLM_API_KEY.' },
-      { status: 503 },
-    );
-  }
-
   let body: unknown;
   try {
     body = await request.json();
@@ -51,8 +45,26 @@ export async function POST(request: Request): Promise<Response> {
     return Response.json({ error: 'Body must be JSON.' }, { status: 400 });
   }
 
-  const { sessionId, message } = (body ?? {}) as {
-    sessionId?: unknown;
+  // Identity comes ONLY from the session cookie (ticket 04). A sessionId in
+  // the body is ignored — declared ids were the pre-auth contract.
+  const cookieSession = await sessionVerifierFromEnv().verify(request);
+  if (!cookieSession) {
+    return Response.json(
+      { error: 'No session. Open the page to sign in anonymously first.' },
+      { status: 401 },
+    );
+  }
+  const sessionId = cookieSession;
+
+  if (!process.env['E2B_API_KEY'] || !process.env['LLM_API_KEY']) {
+    return Response.json(
+      { error: 'Server is missing E2B_API_KEY or LLM_API_KEY.' },
+      { status: 503 },
+    );
+  }
+
+
+  const { message } = (body ?? {}) as {
     message?: unknown;
   };
 
