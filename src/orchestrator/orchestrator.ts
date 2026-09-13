@@ -277,6 +277,21 @@ function parsePlanArgs(raw: string): Plan {
       // Absent gate = pass through. A FAILED gate is terminal: rollback
       // semantics belong to the gate itself; here we stop, surface the
       // finding, and remember it for the rewrite turn.
+      // Build-time env for persistent apps: publishable values only — the
+      // secret key NEVER enters the sandbox (migrations run server-side).
+      const appsUrl = process.env['APPS_SUPABASE_URL'];
+      if (appsUrl) {
+        await deps.sandbox.writeFile(
+          sandboxId,
+          '.env',
+          [
+            `VITE_SUPABASE_URL=${appsUrl}`,
+            `VITE_SUPABASE_PUBLISHABLE_KEY=${process.env['APPS_SUPABASE_PUBLISHABLE_KEY'] ?? ''}`,
+            `VITE_WORKSPACE_ID=${sessionId}`,
+          ].join('\n'),
+        );
+      }
+
       let migrationSql: string | undefined;
       try {
         const migrationFiles = (await deps.sandbox.listFiles(sandboxId, 'supabase/migrations'))

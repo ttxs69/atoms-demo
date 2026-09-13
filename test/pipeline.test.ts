@@ -761,3 +761,26 @@ test('no migrations → no migrating step (pipeline unchanged)', async () => {
   const events = await collect(orchestrator.run('s-nomig', 'go'));
   assert.ok(!events.some((e) => e.type === 'run_step' && (e as { step: string }).step === 'migrating'));
 });
+
+// ─── ticket 04: build-time env injection for persistent apps ──────────────
+
+test('with APPS_SUPABASE configured, the pipeline writes VITE_ env into the sandbox', async () => {
+  process.env['APPS_SUPABASE_URL'] = 'https://apps.supabase.co';
+  process.env['APPS_SUPABASE_PUBLISHABLE_KEY'] = 'pk-test';
+  try {
+    const sandbox = new FakeSandbox();
+    const orchestrator = makeOrchestrator(sandbox, {
+      eng: [writeTurn({ 'src/App.tsx': 'x' }), done],
+    });
+    await collect(orchestrator.run('ws-env', 'go'));
+    const sid = [...sandbox.files.keys()][0]!;
+    const env = await sandbox.readFile(sid, '.env');
+    assert.ok(env.includes('VITE_SUPABASE_URL=https://apps.supabase.co'));
+    assert.ok(env.includes('VITE_SUPABASE_PUBLISHABLE_KEY=pk-test'));
+    assert.ok(env.includes('VITE_WORKSPACE_ID=ws-env'));
+    assert.ok(!env.includes('SECRET'), 'secret key never lands in the sandbox');
+  } finally {
+    delete process.env['APPS_SUPABASE_URL'];
+    delete process.env['APPS_SUPABASE_PUBLISHABLE_KEY'];
+  }
+});

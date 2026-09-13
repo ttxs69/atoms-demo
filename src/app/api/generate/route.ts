@@ -4,6 +4,7 @@ import { createModelAdapter } from '../../../ports/llm-model-adapter.ts';
 import { encodeEvent } from '../../../transport/sse.ts';
 import { keyFor, ledgerPort, requestScopedCredits, withRequestKey } from '../../../credits/route-credits.ts';
 import { sessionVerifierFromEnv } from '../../../auth/session.ts';
+import { SharedProjectGate } from '../../../backend/supabase-gate.ts';
 
 export const runtime = 'nodejs';
 
@@ -19,8 +20,30 @@ const MAX_MESSAGE_LENGTH = 4000;
 let orchestratorPromise: Promise<ReturnType<typeof createOrchestrator>> | null =
   null;
 
+async function buildGate() {
+  const dbUrl = process.env['APPS_SUPABASE_DB_URL'];
+  if (!dbUrl) return undefined; // degraded: no shared project, gate absent
+  const { Client } = await import('pg');
+  const client = new Client({ connectionString: dbUrl });
+  await client.connect();
+  const tx = async <T,>(fn: (c: import('../../../credits/ledger.ts').SqlClient) => Promise<T>): Promise<T> => {
+    await client.query('BEGIN');
+    try {
+      const out = await fn(client as unknown as import('../../../credits/ledger.ts').SqlClient);
+      await client.query('COMMIT');
+      return out;
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    }
+  };
+  const wrapped = client as unknown as import('../../../credits/ledger.ts').SqlClient & { transaction: typeof tx };
+  wrapped.transaction = tx;
+  return new SharedProjectGate(wrapped);
+}
+
 function buildOrchestrator() {
-  return ledgerPort().then((ledger) =>
+  return Promise.all([ledgerPort(), buildGate()]).then(([ledger, gate]) =>
     createOrchestrator({
       sandbox: new E2BSandboxAdapter(process.env['E2B_API_KEY'] ?? ''),
       model: createModelAdapter({
@@ -33,6 +56,7 @@ function buildOrchestrator() {
       // context — the singleton keeps its sandbox/session state while
       // credits stay per-request.
       credits: requestScopedCredits(ledger),
+      ...(gate ? { gate } : {}),
     }),
   );
 }
