@@ -28,7 +28,11 @@ export function startGcScheduler(
     }
   };
 
-  void run();
+  const bootTimer = setTimeout(() => {
+    run().catch(() => { /* already logged inside run */ });
+  }, 5_000);
+  (bootTimer as unknown as { unref?: () => void }).unref?.();
+
   const timer = setInterval(() => {
     if (!stopped) void run();
   }, intervalMs);
