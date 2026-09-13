@@ -77,3 +77,12 @@ test('captcha: absent keys allow (dev); Turnstile fails closed on fetch errors',
     globalThis.fetch = originalFetch;
   }
 });
+
+// ─── Turnstile widget 客户端接线 ───────────────────────────────────────────
+
+test('turnstile token resolves when configured, rejects without failing the page', async () => {
+  const { turnstileToken } = await import('../src/auth/turnstile-client.ts');
+  // 无 key（本地开发）：立即 null，页面不挂
+  delete process.env['NEXT_PUBLIC_TURNSTILE_SITE_KEY'];
+  assert.equal(await turnstileToken(), null);
+});

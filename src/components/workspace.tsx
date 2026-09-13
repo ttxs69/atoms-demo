@@ -371,10 +371,15 @@ export function Workspace() {
           if (fresh.data.session?.access_token && fresh.data.user) {
             sessionIdRef.current = fresh.data.user.id;
             setIdentity(fresh.data.user.id);
+            const { turnstileToken } = await import('../auth/turnstile-client.ts');
+            const tsToken = await turnstileToken();
             await fetch('/api/auth/session', {
               method: 'POST',
               headers: { 'content-type': 'application/json' },
-              body: JSON.stringify({ accessToken: fresh.data.session.access_token }),
+              body: JSON.stringify({
+                accessToken: fresh.data.session.access_token,
+                ...(tsToken ? { turnstileToken: tsToken } : {}),
+              }),
             });
           }
           return;
@@ -446,10 +451,15 @@ export function Workspace() {
       setShowLogin(false);
       sessionIdRef.current = data.user.id;
       setIdentity(data.user.id);
+      const { turnstileToken } = await import('../auth/turnstile-client.ts');
+      const tsToken = await turnstileToken();
       await fetch('/api/auth/session', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ accessToken: data.session.access_token }),
+        body: JSON.stringify({
+          accessToken: data.session.access_token,
+          ...(tsToken ? { turnstileToken: tsToken } : {}),
+        }),
       });
       // 登录后走同一个找回预览的路径
       try {
@@ -492,10 +502,15 @@ export function Workspace() {
     if (data.session?.access_token && data.user) {
       sessionIdRef.current = data.user.id;
       setIdentity(data.user.id);
+      const { turnstileToken } = await import('../auth/turnstile-client.ts');
+      const tsToken = await turnstileToken();
       await fetch('/api/auth/session', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ accessToken: data.session.access_token }),
+        body: JSON.stringify({
+          accessToken: data.session.access_token,
+          ...(tsToken ? { turnstileToken: tsToken } : {}),
+        }),
       });
     }
   }, []);
