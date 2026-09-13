@@ -339,7 +339,13 @@ export function Workspace() {
           return;
         }
         const supabase = createClient(url, anonKey);
-        const { data } = await supabase.auth.signInAnonymously();
+        // Reuse the persisted session first — a blind signInAnonymously on
+        // every load mints a NEW anonymous user each time, orphaning the
+        // previous workspace. supabase-js persists sessions in localStorage.
+        const existing = await supabase.auth.getSession();
+        const { data } = existing.data.session
+          ? { data: { session: existing.data.session, user: existing.data.session.user } }
+          : await supabase.auth.signInAnonymously();
         if (data.session?.access_token) {
           await fetch('/api/auth/session', {
             method: 'POST',

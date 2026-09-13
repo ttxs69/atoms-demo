@@ -52,6 +52,20 @@ export class E2BSandboxAdapter implements SandboxPort {
     await sandbox.files.write(path, content);
   }
 
+  async findSandbox(workspaceId: string): Promise<string | null> {
+    const paginator = Sandbox.list({
+      apiKey: this.#apiKey,
+      query: { metadata: { workspace_id: workspaceId } },
+    });
+    let page = await paginator.nextItems();
+    const all = [...page];
+    while (paginator.hasNext) {
+      page = await paginator.nextItems();
+      all.push(...page);
+    }
+    return all.length > 0 ? all[0]!.sandboxId : null;
+  }
+
   async listFiles(sandboxId: string, dir: string): Promise<string[]> {
     const sandbox = await this.#connect(sandboxId);
     const entries = await sandbox.files.list(dir);

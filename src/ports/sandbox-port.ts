@@ -20,6 +20,8 @@ export interface SandboxPort {
   ): Promise<{ exitCode: number; output: string }>;
   /** Start a long-running process (dev server). Returns a process id. */
   runBackground(sandboxId: string, cmd: string): Promise<string>;
+  /** Locate the sandbox a workspace owns (by create-time metadata). */
+  findSandbox(workspaceId: string): Promise<string | null>;
   /** The public host for a port — the URL the preview iframe loads. */
   getPreviewHost(sandboxId: string, port: number): Promise<string>;
   pause(sandboxId: string): Promise<void>;

@@ -784,3 +784,33 @@ test('with APPS_SUPABASE configured, the pipeline writes VITE_ env into the sand
     delete process.env['APPS_SUPABASE_PUBLISHABLE_KEY'];
   }
 });
+
+// ─── restart recovery: a NEW process adopts the old sandbox ────────────────
+
+test('a fresh orchestrator (simulated restart) finds the old sandbox and iterates', async () => {
+  const sandbox = new FakeSandbox();
+  // 进程 A：完整首轮
+  const first = createOrchestrator({
+    sandbox,
+    model: new FakeModel({
+      pm: planTurn(['src/App.tsx']),
+      eng: [writeTurn({ 'src/App.tsx': 'v1' }), done],
+    }),
+    credits: new FakeCredits(),
+  });
+  await collect(first.run('ws-keep', '做个应用'));
+  const sandboxId1 = [...sandbox.files.keys()][0]!;
+
+  // 进程 B：全新实例（内存 map 为空），同一 workspace id
+  const model2 = new FakeModel({
+    eng: [writeTurn({ 'src/App.tsx': 'v2' }), done],
+  });
+  const second = createOrchestrator({ sandbox, model: model2, credits: new FakeCredits() });
+  const events = await collect(second.run('ws-keep', '改成三列'));
+
+  assert.ok(!events.some((e) => e.type === 'plan_ready'), 'no re-plan: it iterates');
+  assert.ok(!events.some((e) => e.type === 'error'), 'no errors');
+  const sandboxId2 = [...sandbox.files.keys()][0]!;
+  assert.equal(sandboxId2, sandboxId1, 'the SAME sandbox — not a new one');
+  assert.equal(await sandbox.readFile(sandboxId2, 'src/App.tsx'), 'v2');
+});

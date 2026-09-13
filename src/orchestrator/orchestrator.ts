@@ -156,6 +156,25 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       }
     }
 
+    // In-memory miss (process restarted): the sandbox still exists in E2B —
+    // it was created with workspace metadata exactly so it can be found
+    // again. Adopt it and rebuild the session's file manifest from disk, so
+    // the next iterate turn sees the current code instead of a blank slate.
+    const found = await deps.sandbox.findSandbox(sessionId);
+    if (found !== null) {
+      sandboxBySession.set(sessionId, found);
+      try {
+        const recovered = new Set<string>();
+        for (const path of await deps.sandbox.listFiles(found, 'src')) {
+          recovered.add(path.replace(/^\.\//, ''));
+        }
+        if (recovered.size > 0) sessionPaths.set(sessionId, recovered);
+      } catch {
+        // unreadable tree — the next turn re-plans as a first turn
+      }
+      return found;
+    }
+
     // Session and workspace are 1:1 in the MVP, so the session id doubles as
     // the workspace id the sandbox is tagged with.
     const created = await deps.sandbox.create(sessionId);

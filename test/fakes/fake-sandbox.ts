@@ -21,6 +21,7 @@ export class FakeSandbox implements SandboxPort {
 
   #nextId = 1;
   #failures: { match: RegExp; output: string; times: number }[] = [];
+  readonly #byWorkspace = new Map<string, string>();
 
   /** When true, the readiness probe never succeeds (drives the no-server test). */
   probeNeverReady = false;
@@ -36,7 +37,12 @@ export class FakeSandbox implements SandboxPort {
   async create(workspaceId: string): Promise<string> {
     const sandboxId = `fake-sandbox-${this.#nextId++}-${workspaceId}`;
     this.files.set(sandboxId, new Map());
+    this.#byWorkspace.set(workspaceId, sandboxId);
     return sandboxId;
+  }
+
+  async findSandbox(workspaceId: string): Promise<string | null> {
+    return this.#byWorkspace.get(workspaceId) ?? null;
   }
 
   async writeFile(sandboxId: string, path: string, content: string): Promise<void> {
@@ -102,6 +108,9 @@ export class FakeSandbox implements SandboxPort {
   async kill(sandboxId: string): Promise<void> {
     this.killed.add(sandboxId);
     this.files.delete(sandboxId);
+    for (const [ws, id] of this.#byWorkspace) {
+      if (id === sandboxId) this.#byWorkspace.delete(ws);
+    }
   }
 
   /** Convenience for assertions: the paths written to a sandbox, sorted. */
