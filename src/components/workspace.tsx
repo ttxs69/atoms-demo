@@ -104,8 +104,15 @@ export function Workspace() {
   // 把它埋在顶栏小按钮里等人发现。
   const [saveInvite, setSaveInvite] = useState(false);
   const [saveEmail, setSaveEmail] = useState('');
+  const [savePassword, setSavePassword] = useState('');
   const [saving, setSaving] = useState(false);
   const [upgraded, setUpgraded] = useState(false);
+  // 已有账户的再登录（升级时设过密码的用户，换设备/清缓存后用）
+  const [showLogin, setShowLogin] = useState(false);
+  const [loginEmail, setLoginEmail] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
+  const [loggingIn, setLoggingIn] = useState(false);
+  const [loginError, setLoginError] = useState<string | null>(null);
   const [pane, setPane] = useState<'preview' | 'code'>('preview');
   const [previewOpen, setPreviewOpen] = useState(false);
   const [codeFiles, setCodeFiles] = useState<string[]>([]);
@@ -357,17 +364,23 @@ export function Workspace() {
         // every load mints a NEW anonymous user each time, orphaning the
         // previous workspace. supabase-js persists sessions in localStorage.
         const existing = await supabase.auth.getSession();
-        const { data } = existing.data.session
-          ? { data: { session: existing.data.session, user: existing.data.session.user } }
-          : await supabase.auth.signInAnonymously();
-        if (data.session?.access_token) {
+        if (!existing.data.session) {
+          // 没有会话：可能是一台新设备。不马上匿名——先让用户选
+          // （登录旧账户 vs 直接开始）。选择之前不建立身份。
+          setShowLogin(true);
+          setIdentity(null);
+          return;
+        }
+        const session = existing.data.session;
+        if (session?.access_token && session.user) {
+          const data = { session, user: session.user };
           await fetch('/api/auth/session', {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ accessToken: data.session.access_token }),
+            body: JSON.stringify({ accessToken: session.access_token }),
           });
-          sessionIdRef.current = data.user?.id ?? '';
-          const id = data.user?.id ?? null;
+          sessionIdRef.current = session.user.id;
+          const id = session.user.id;
           setIdentity(id);
 
           // Returning visitor: if this workspace already has an app, bring
@@ -405,6 +418,80 @@ export function Workspace() {
     })();
   }, []);
 
+  const loginExisting = useCallback(async () => {
+    setLoggingIn(true);
+    setLoginError(null);
+    try {
+      const { createClient } = await import('@supabase/supabase-js');
+      const supabase = createClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      );
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: loginEmail,
+        password: loginPassword,
+      });
+      if (error || !data.session) {
+        setLoginError(error?.message ?? '登录失败，请检查邮箱和密码。');
+        return;
+      }
+      setShowLogin(false);
+      sessionIdRef.current = data.user.id;
+      setIdentity(data.user.id);
+      await fetch('/api/auth/session', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ accessToken: data.session.access_token }),
+      });
+      // 登录后走同一个找回预览的路径
+      try {
+        const res = await fetch('/api/preview');
+        if (res.ok) {
+          const d = (await res.json()) as { url?: string; files?: string[] };
+          if (d.url) {
+            maybeOfferSave();
+            setPreviewUrl(d.url);
+            setPreviewNonce((n) => n + 1);
+            setPreviewOpen(true);
+            if (d.files?.length) {
+              setPlanFiles(
+                d.files
+                  .filter((f) => f.startsWith('src/'))
+                  .map((path, i) => ({
+                    toolCallId: `login-${i}`,
+                    path,
+                    bytes: null,
+                    state: 'done' as const,
+                  })),
+              );
+            }
+          }
+        }
+      } catch { /* nothing to restore — fine */ }
+    } finally {
+      setLoggingIn(false);
+    }
+  }, [loginEmail, loginPassword]);
+
+  const startAnonymous = useCallback(async () => {
+    setShowLogin(false);
+    const { createClient } = await import('@supabase/supabase-js');
+    const supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    );
+    const { data } = await supabase.auth.signInAnonymously();
+    if (data.session?.access_token && data.user) {
+      sessionIdRef.current = data.user.id;
+      setIdentity(data.user.id);
+      await fetch('/api/auth/session', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ accessToken: data.session.access_token }),
+      });
+    }
+  }, []);
+
   const maybeOfferSave = useCallback(() => {
     if (typeof window === 'undefined') return;
     if (localStorage.getItem('forge-save-dismissed')) return;
@@ -414,13 +501,13 @@ export function Workspace() {
   }, [identity]);
 
   const submitSave = useCallback(async () => {
-    if (!saveEmail.includes('@')) return;
+    if (!saveEmail.includes('@') || savePassword.length < 6) return;
     setSaving(true);
     try {
       const res = await fetch('/api/auth/upgrade', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ email: saveEmail }),
+        body: JSON.stringify({ email: saveEmail, password: savePassword }),
       });
       if (res.ok) {
         setUpgraded(true);
@@ -529,6 +616,45 @@ export function Workspace() {
         <section className="chat" aria-label="对话">
           <div className="chat-scroll">
             {messages.length === 0 ? (
+              <>
+              {showLogin ? (
+                <div className="empty">
+                  <h1>欢迎回来</h1>
+                  <p>登录已保存的账户，找回你的应用；或直接匿名开始一个新的。</p>
+                  <div className="login-box">
+                    <input
+                      type="email"
+                      value={loginEmail}
+                      onChange={(e) => setLoginEmail(e.target.value)}
+                      placeholder="you@example.com"
+                      aria-label="邮箱"
+                    />
+                    <input
+                      type="password"
+                      value={loginPassword}
+                      onChange={(e) => setLoginPassword(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') void loginExisting(); }}
+                      placeholder="密码"
+                      aria-label="密码"
+                    />
+                    {loginError ? <div className="login-err">{loginError}</div> : null}
+                    <div className="save-row">
+                      <button
+                        type="button"
+                        className="btn primary"
+                        disabled={loggingIn || !loginEmail.includes('@') || loginPassword.length < 6}
+                        onClick={() => void loginExisting()}
+                      >
+                        {loggingIn ? '登录中…' : '登录'}
+                      </button>
+                      <button type="button" className="btn" onClick={() => void startAnonymous()}>
+                        直接开始（匿名）
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+              {!showLogin ? (
               <div className="empty">
                 <h1>想做点什么？</h1>
                 <p>
@@ -638,23 +764,30 @@ export function Workspace() {
               <div className="save-invite">
                 <div className="save-title">🎉 应用跑起来了 —— 想保住它吗？</div>
                 <p className="save-note">
-                  匿名身份清了缓存就没了。留个邮箱，升级成永久账户，换设备也能找回这个应用。
+                  匿名身份清了缓存就没了。留个邮箱和密码，升级成永久账户，换设备也能找回这个应用。
                 </p>
                 <div className="save-row">
                   <input
                     type="email"
                     value={saveEmail}
                     onChange={(e) => setSaveEmail(e.target.value)}
+                    placeholder="you@example.com"
+                    aria-label="邮箱"
+                  />
+                  <input
+                    type="password"
+                    value={savePassword}
+                    onChange={(e) => setSavePassword(e.target.value)}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') void submitSave();
                     }}
-                    placeholder="you@example.com"
-                    aria-label="邮箱"
+                    placeholder="密码（至少 6 位，下次登录用）"
+                    aria-label="密码"
                   />
                   <button
                     type="button"
                     className="btn primary"
-                    disabled={saving || !saveEmail.includes('@')}
+                    disabled={saving || !saveEmail.includes('@') || savePassword.length < 6}
                     onClick={() => void submitSave()}
                   >
                     {saving ? '保存中…' : '保住它'}
@@ -671,6 +804,8 @@ export function Workspace() {
                   </button>
                 </div>
               </div>
+              ) : null}
+              </>
             ) : null}
 
             {planFiles.length > 0 ? (

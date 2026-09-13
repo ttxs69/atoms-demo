@@ -650,3 +650,23 @@ details.activity .log {
   font: inherit;
   font-size: 13px;
 }
+
+/* Returning-user login box -------------------------------------------------- */
+.login-box {
+  max-width: 320px;
+  margin: 0 auto;
+  display: grid;
+  gap: 8px;
+  text-align: left;
+}
+.login-box input {
+  border: 1px solid var(--n2);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 13px;
+}
+.login-err {
+  color: var(--err);
+  font-size: 12px;
+}

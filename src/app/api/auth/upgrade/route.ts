@@ -22,9 +22,13 @@ export async function POST(request: Request): Promise<Response> {
   } catch {
     return Response.json({ error: 'Body must be JSON.' }, { status: 400 });
   }
-  const { email } = (body ?? {}) as { email?: unknown };
+  const { email, password } = (body ?? {}) as { email?: unknown; password?: unknown };
   if (typeof email !== 'string' || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
     return Response.json({ error: '请输入有效的邮箱地址。' }, { status: 400 });
+  }
+  // 密码是升级的一部分：只有邮箱没有凭据，账户在别的设备上永远登录不了。
+  if (typeof password !== 'string' || password.length < 6) {
+    return Response.json({ error: '请设置至少 6 位的密码——它是你下次登录的凭据。' }, { status: 400 });
   }
 
   const url = process.env['SUPABASE_URL'];
@@ -41,7 +45,7 @@ export async function POST(request: Request): Promise<Response> {
   const admin = createClient(url, serviceKey, {
     auth: { autoRefreshToken: false, persistSession: false },
   });
-  const { error } = await admin.auth.admin.updateUserById(userId, { email });
+  const { error } = await admin.auth.admin.updateUserById(userId, { email, password });
   if (error) {
     return Response.json({ error: `升级失败：${error.message}` }, { status: 400 });
   }
