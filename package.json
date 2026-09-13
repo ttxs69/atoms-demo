@@ -12,10 +12,12 @@
     "typecheck": "tsc --noEmit",
     "build": "next build",
     "dev": "next dev --turbopack",
-    "test:live": "RUN_LIVE=1 node --test --test-name-pattern='live:' test/live.test.ts"
+    "test:live": "RUN_LIVE=1 node --test --test-name-pattern='live:' test/live.test.ts",
+    "e2e": "playwright test"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.8",
+    "@playwright/test": "^1.63.0",
     "@types/node": "^22.20.2",
     "@types/pg": "^8.23.1",
     "@types/react": "^19.3.0",

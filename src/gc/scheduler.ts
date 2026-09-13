@@ -44,6 +44,11 @@ export function startGcScheduler(
 
 async function defaultSweep(): Promise<void> {
   const db = await ledgerDb();
+  // The pglite dev instance starts empty; ensure the credits tables exist
+  // before the sweep queries them (the generate path creates them lazily,
+  // but the GC can fire first).
+  const { PostgresCredits } = await import('../credits/ledger.ts');
+  await PostgresCredits.migrate(db);
   const deleters: Deleters = productionDeleters({
     ...(process.env['E2B_API_KEY'] ? { e2bApiKey: process.env['E2B_API_KEY'] } : {}),
     ...(process.env['APPS_SUPABASE_DB_URL']
