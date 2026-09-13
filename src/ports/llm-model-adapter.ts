@@ -175,6 +175,18 @@ class LlmModelAdapter implements ModelPort {
           yield { type: 'tool_call_end', toolCallId: part.id };
           break;
 
+        case 'finish': {
+          // Provider usage lands on the finish part. Meters the WHOLE call,
+          // input and output — this is what settle(actual) books.
+          const usage = part.totalUsage;
+          yield {
+            type: 'usage',
+            input: usage.inputTokens ?? 0,
+            output: usage.outputTokens ?? 0,
+          };
+          break;
+        }
+
         case 'error':
           // Never swallow stream errors: an invalid prompt or provider failure
           // must surface, not masquerade as an empty response that ends the

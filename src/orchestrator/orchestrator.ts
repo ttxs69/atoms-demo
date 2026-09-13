@@ -411,11 +411,12 @@ function parsePlanArgs(raw: string): Plan {
     signal?: AbortSignal,
   ): AsyncGenerator<
     StreamEvent,
-    { filesWritten: number; plan: Plan | null; paths: string[] }
+    { filesWritten: number; plan: Plan | null; paths: string[]; tokens: number }
   > {
     const MAX_STEPS = 10;
     let plan: Plan | null = null;
     let filesWritten = 0;
+    let tokens = 0;
     const paths: string[] = [];
     // Tool arguments arrive as fragments. Buffer them per call id until the
     // model signals the call is complete, then parse and execute once.
@@ -430,6 +431,11 @@ function parsePlanArgs(raw: string): Plan {
         switch (chunk.type) {
           case 'text': {
             yield { type: 'text_delta', agentHandle, delta: chunk.delta };
+            break;
+          }
+
+          case 'usage': {
+            tokens += chunk.input + chunk.output;
             break;
           }
 
@@ -521,7 +527,7 @@ function parsePlanArgs(raw: string): Plan {
       }
     }
 
-    return { filesWritten, plan, paths };
+    return { filesWritten, plan, paths, tokens };
   }
 
   const api = {
@@ -554,6 +560,7 @@ function parsePlanArgs(raw: string): Plan {
       userInput: string,
       opts?: { signal?: AbortSignal },
     ): AsyncIterable<StreamEvent> {
+      let tokensUsed = 0;
       // Reserve BEFORE anything exists: a blocked run must not create a
       // sandbox, run a model call, or touch the filesystem. blocked_credits
       // in the state machine is a pre-flight gate, not a failure.
@@ -620,6 +627,7 @@ function parsePlanArgs(raw: string): Plan {
           sandboxId,
           opts?.signal,
         );
+        tokensUsed += pmResult.tokens;
         yield { type: 'agent_done', agentHandle: 'pm', creditsUsed: 0 };
 
         if (pmResult.plan) {
@@ -636,11 +644,12 @@ function parsePlanArgs(raw: string): Plan {
 
       // ── Alex builds. ──────────────────────────────────────────────────
       let aborted = opts?.signal?.aborted === true;
-      let engResult: { filesWritten: number; plan: Plan | null; paths: string[] } = {
-        filesWritten: 0,
-        plan: null,
-        paths: [],
-      };
+      let engResult: {
+        filesWritten: number;
+        plan: Plan | null;
+        paths: string[];
+        tokens: number;
+      } = { filesWritten: 0, plan: null, paths: [], tokens: 0 };
       if (!aborted) {
         yield { type: 'agent_started', agentHandle: 'eng', messageId: `msg-${++messageCounter}` };
         engResult = yield* runAgentSteps(
@@ -649,6 +658,7 @@ function parsePlanArgs(raw: string): Plan {
           sandboxId,
           opts?.signal,
         );
+        tokensUsed += engResult.tokens;
         aborted = opts?.signal?.aborted === true;
       }
 
@@ -685,7 +695,7 @@ function parsePlanArgs(raw: string): Plan {
         }
       }
 
-      await deps.credits.settle(sessionId, 0);
+      await deps.credits.settle(sessionId, tokensUsed);
 
       // Merge everything this turn wrote (including fix rounds) into the
       // session manifest for the next iterate turn.
@@ -695,7 +705,7 @@ function parsePlanArgs(raw: string): Plan {
         sessionPaths.set(sessionId, sessionSet);
       }
 
-      yield { type: 'agent_done', agentHandle: 'eng', creditsUsed: 0 };
+      yield { type: 'agent_done', agentHandle: 'eng', creditsUsed: tokensUsed };
     },
   };
 

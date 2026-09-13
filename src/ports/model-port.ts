@@ -13,6 +13,8 @@ import type { AgentHandle } from '../domain/roles.ts';
  */
 export type ModelChunk =
   | { type: 'text'; delta: string }
+  /** Reported once per model turn when the provider's usage lands. */
+  | { type: 'usage'; input: number; output: number }
   | { type: 'tool_call_start'; toolCallId: string; toolName: string }
   | { type: 'tool_input_delta'; toolCallId: string; argsDelta: string }
   | { type: 'tool_call_end'; toolCallId: string };

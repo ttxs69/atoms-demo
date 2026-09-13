@@ -679,3 +679,33 @@ test('the turn after a gate failure carries the rewrite context', async () => {
     .find((c) => JSON.stringify(c.messages).includes('LINT_0024'));
   assert.ok(rewriteCall, 'the gate finding travels into the rewrite prompt');
 });
+
+// ─── ticket 02: token metering is real ────────────────────────────────────
+
+test('usage chunks flow into settle and agent_done', async () => {
+  const credits = new FakeCredits();
+  const orchestrator = createOrchestrator({
+    sandbox: new FakeSandbox(),
+    model: new FakeModel({
+      pm: [[{ type: 'text', delta: 'plan' }, ...PLAN_DONE], [{ type: 'text', delta: 'ok' }]],
+      eng: [
+        [
+          { type: 'usage', input: 100, output: 200 },
+          { type: 'tool_call_start', toolCallId: 't1', toolName: 'write_file' },
+          { type: 'tool_input_delta', toolCallId: 't1', argsDelta: '{"path":"src/App.tsx","content":"x"}' },
+          { type: 'tool_call_end', toolCallId: 't1' },
+          { type: 'usage', input: 50, output: 150 },
+        ],
+        [{ type: 'text', delta: 'done' }, { type: 'usage', input: 10, output: 20 }],
+      ],
+    }),
+    credits,
+  });
+
+  const events = await collect(orchestrator.run('s-usage', 'go'));
+
+  assert.equal(credits.settlements[0]?.actualTokens, 480, '100+200+50+150+10+20');
+  const done = events.find((e) => e.type === 'agent_done' && e.agentHandle === 'eng');
+  assert.equal((done as { creditsUsed: number }).creditsUsed, 480);
+});
+const PLAN_DONE = [{ type: 'tool_call_start' as const, toolCallId: 'p1', toolName: 'plan_files' }, { type: 'tool_input_delta' as const, toolCallId: 'p1', argsDelta: '{"files":["src/App.tsx"],"description":"d"}' }, { type: 'tool_call_end' as const, toolCallId: 'p1' }];
