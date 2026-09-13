@@ -36,3 +36,13 @@ research/
 
 > ⚠️ `research/` 下未标注 `-verified` 的文件产出时子 agent 未加载到联网工具，
 > 内容为模型记忆而非一手来源，**不可作为决策依据**。详见 `research/README.md`。
+
+## 首次配置
+
+```bash
+bash scripts/setup-wizard.sh
+```
+
+交互式配置全部外部凭据：平台 Supabase 项目（账号系统）、共享 Supabase
+项目（生成应用数据）、Cloudflare Turnstile、管理面板 token 与额度参数。
+已配置的值重跑时回车保留。E2B 与 LLM 的 key 见 `.env.example` 注释。
