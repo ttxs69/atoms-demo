@@ -45,11 +45,11 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: '验证码错误' }, { status: 401 });
   }
 
-  // 2. 找 / 创建用户
+  // 2. 找 / 创建用户（用 APPS Supabase，auth + projects 同一个 DB）
   const platformAdmin = createClient(
-    process.env['NEXT_PUBLIC_SUPABASE_URL']!,
-    process.env['SUPABASE_SECRET_KEY']!,
-    { auth: { persistSession: false } },
+    process.env['APPS_SUPABASE_URL']!,
+    process.env['APPS_SUPABASE_SECRET_KEY']!,
+    { auth: { persistSession: false, autoRefreshToken: false } },
   );
 
   const { data: usersList } = await platformAdmin.auth.admin.listUsers();

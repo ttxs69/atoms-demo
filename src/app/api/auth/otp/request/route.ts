@@ -55,24 +55,26 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'OTP 存储失败：' + dbErr.message }, { status: 500 });
   }
 
-  // 3. 通过 Ethereal SMTP 发邮件（无需 dashboard 配置，邮件可在 ethereal.email 查看）
-  try {
-    const { transporter: t } = await getTransporter();
-    const info = await t.sendMail({
-      from: '"Forge" <noreply@forge.dev>',
-      to: email,
-      subject: 'Forge 登录验证码',
-      text: `你的验证码是 ${code}，10 分钟内有效。`,
-      html: `<h2>登录 Forge</h2><p>你的验证码：</p><h1 style="font-size:32px;letter-spacing:8px;font-family:monospace">${code}</h1><p>10 分钟内有效。</p>`,
-    });
-    // Ethereal 给每个邮件一个 URL，能在 web 看到内容
-    const previewUrl = nodemailer.getTestMessageUrl(info);
-    // eslint-disable-next-line no-console
-    console.log(`[OTP] ${email} → ${code} | preview: ${previewUrl}`);
-  } catch (e) {
-    // eslint-disable-next-line no-console
-    console.error(`[OTP] email send failed: ${e instanceof Error ? e.message : e}`);
-  }
+  // 3. 通过 Ethereal SMTP 发邮件——后台发送，不阻塞响应
+  // eslint-disable-next-line @typescript-eslint/no-floating-promises
+  (async () => {
+    try {
+      const { transporter: t } = await getTransporter();
+      const info = await t.sendMail({
+        from: '"Forge" <noreply@forge.dev>',
+        to: email,
+        subject: 'Forge 登录验证码',
+        text: `你的验证码是 ${code}，10 分钟内有效。`,
+        html: `<h2>登录 Forge</h2><p>你的验证码：</p><h1 style="font-size:32px;letter-spacing:8px;font-family:monospace">${code}</h1><p>10 分钟内有效。</p>`,
+      });
+      const previewUrl = nodemailer.getTestMessageUrl(info);
+      // eslint-disable-next-line no-console
+      console.log(`[OTP] ${email} → ${code} | preview: ${previewUrl}`);
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error(`[OTP] email send failed: ${e instanceof Error ? e.message : e}`);
+    }
+  })();
 
   // 4. dev 模式返回 OTP（方便测试）
   if (process.env['DEV_OTP_VISIBLE'] === '1') {

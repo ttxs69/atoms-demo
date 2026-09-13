@@ -72,7 +72,8 @@ export function readSessionCookie(cookieHeader: string | null): string | null {
 }
 
 export function sessionVerifierFromEnv(): SessionVerifier {
-  const url = process.env['SUPABASE_URL'];
-  const anonKey = process.env['SUPABASE_ANON_KEY'];
+  // 优先用 APPS（auth + projects 同 project），fallback 到老的 SUPABASE_URL
+  const url = process.env['APPS_SUPABASE_URL'] ?? process.env['SUPABASE_URL'];
+  const anonKey = process.env['APPS_SUPABASE_PUBLISHABLE_KEY'] ?? process.env['SUPABASE_ANON_KEY'];
   return url && anonKey ? new SupabaseVerifier(url, anonKey) : new DevVerifier();
 }

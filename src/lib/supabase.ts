@@ -1,28 +1,32 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
-let cached: SupabaseClient | null = null;
+/**
+ * 单一 Supabase 项目 = APPS（gzbjqtvipsuubmynxhdl），承担账号 + projects + 应用数据。
+ * Railway env 里 SUPABASE_URL/SECRET/ANON 都指向 APPS，所以下面前两个函数
+ * 和老的 supabase 客户端是同一个连接。
+ */
+let platformCached: SupabaseClient | null = null;
+let appsCached: SupabaseClient | null = null;
 
-/** 平台 Supabase（账号/credits/turnstile/Auth）—— 这个用 anon key */
 export function platformSupabase(): SupabaseClient {
-  if (cached) return cached;
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!url || !anonKey) throw new Error('NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY not set');
-  cached = createClient(url, anonKey, {
-    auth: { persistSession: false }, // 服务端不用 session
+  if (platformCached) return platformCached;
+  // 优先 APPS（auth + projects 同一个），fallback SUPABASE_*
+  const url = process.env['APPS_SUPABASE_URL'] ?? process.env['SUPABASE_URL'];
+  const secretKey = process.env['APPS_SUPABASE_SECRET_KEY'] ?? process.env['SUPABASE_SECRET_KEY'];
+  if (!url || !secretKey) throw new Error('SUPABASE_URL / SUPABASE_SECRET_KEY not set');
+  platformCached = createClient(url, secretKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
   });
-  return cached;
+  return platformCached;
 }
 
-/** APPS Supabase（生成应用数据 + 项目数据）—— 同样 anon key，但 URL 不同 */
-let appsCached: SupabaseClient | null = null;
 export function appsSupabase(): SupabaseClient {
   if (appsCached) return appsCached;
   const url = process.env['APPS_SUPABASE_URL'];
-  const anonKey = process.env['APPS_SUPABASE_PUBLISHABLE_KEY'];
-  if (!url || !anonKey) throw new Error('APPS_SUPABASE_URL / APPS_SUPABASE_PUBLISHABLE_KEY not set');
-  appsCached = createClient(url, anonKey, {
-    auth: { persistSession: false },
+  const secretKey = process.env['APPS_SUPABASE_SECRET_KEY'];
+  if (!url || !secretKey) throw new Error('APPS_SUPABASE_URL / APPS_SUPABASE_SECRET_KEY not set');
+  appsCached = createClient(url, secretKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
   });
   return appsCached;
 }

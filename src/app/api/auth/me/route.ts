@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { platformSupabase } from '@/lib/supabase.ts';
+import { createClient } from '@supabase/supabase-js';
 
 export const runtime = 'nodejs';
 
@@ -16,7 +16,13 @@ export async function GET(request: Request) {
   }
   if (!parsed.access_token) return NextResponse.json({ user: null });
 
-  const { data, error } = await platformSupabase().auth.getUser(parsed.access_token);
+  // 用 APPS 验证（auth + projects 同一个 project）
+  const sb = createClient(
+    process.env['APPS_SUPABASE_URL']!,
+    process.env['APPS_SUPABASE_PUBLISHABLE_KEY']!,
+    { auth: { persistSession: false } },
+  );
+  const { data, error } = await sb.auth.getUser(parsed.access_token);
   if (error || !data.user) return NextResponse.json({ user: null });
   return NextResponse.json({
     user: { id: data.user.id, email: data.user.email },

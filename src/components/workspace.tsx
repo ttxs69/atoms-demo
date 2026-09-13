@@ -349,8 +349,9 @@ export function Workspace() {
     void (async () => {
       try {
         const { createClient } = await import('@supabase/supabase-js');
-        const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-        const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+        // 匿名登录也走 APPS（auth + projects 同源）
+        const url = process.env['NEXT_PUBLIC_APPS_SUPABASE_URL'];
+        const anonKey = process.env['NEXT_PUBLIC_APPS_SUPABASE_PUBLISHABLE_KEY'];
         if (!url || !anonKey) {
           let devId = localStorage.getItem('forge-dev-session');
           if (!devId) {
