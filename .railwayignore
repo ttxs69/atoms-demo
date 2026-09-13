@@ -1,6 +1,5 @@
 .next
 node_modules
-.env
 test-results
 e2e
 .scratch
