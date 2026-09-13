@@ -2,23 +2,9 @@ import { createOrchestrator } from '../../../orchestrator/orchestrator.ts';
 import { E2BSandboxAdapter } from '../../../ports/e2b-sandbox-adapter.ts';
 import { createModelAdapter } from '../../../ports/llm-model-adapter.ts';
 import { encodeEvent } from '../../../transport/sse.ts';
-import type { CreditsPort } from '../../../ports/credits-port.ts';
+import { keyFor, ledgerPort, requestScopedCredits, withRequestKey } from '../../../credits/route-credits.ts';
 
 export const runtime = 'nodejs';
-
-/**
- * Credits are not enforced yet — that is ticket 08. This placeholder always
- * approves, so the reservation call site exists and ticket 08 only has to swap
- * the implementation.
- */
-const UNMETERED_CREDITS: CreditsPort = {
-  async reserve() {
-    return { ok: true };
-  },
-  async settle() {
-    /* no-op until ticket 08 */
-  },
-};
 
 const MAX_MESSAGE_LENGTH = 4000;
 
@@ -29,16 +15,26 @@ const MAX_MESSAGE_LENGTH = 4000;
  * The LLM provider is env-driven: any OpenAI-compatible or Anthropic-protocol
  * endpoint works (deepseek / glm / minimax all covered). See llm-model-adapter.
  */
-const orchestrator = createOrchestrator({
-  sandbox: new E2BSandboxAdapter(process.env['E2B_API_KEY'] ?? ''),
-  model: createModelAdapter({
-    protocol: process.env['LLM_PROTOCOL'] === 'anthropic' ? 'anthropic' : 'openai',
-    baseUrl: process.env['LLM_BASE_URL'] ?? 'https://api.deepseek.com/v1',
-    apiKey: process.env['LLM_API_KEY'] ?? '',
-    model: process.env['LLM_MODEL'] ?? 'deepseek-chat',
-  }),
-  credits: UNMETERED_CREDITS,
-});
+let orchestratorPromise: Promise<ReturnType<typeof createOrchestrator>> | null =
+  null;
+
+function buildOrchestrator() {
+  return ledgerPort().then((ledger) =>
+    createOrchestrator({
+      sandbox: new E2BSandboxAdapter(process.env['E2B_API_KEY'] ?? ''),
+      model: createModelAdapter({
+        protocol: process.env['LLM_PROTOCOL'] === 'anthropic' ? 'anthropic' : 'openai',
+        baseUrl: process.env['LLM_BASE_URL'] ?? 'https://api.deepseek.com/v1',
+        apiKey: process.env['LLM_API_KEY'] ?? '',
+        model: process.env['LLM_MODEL'] ?? 'deepseek-chat',
+      }),
+      // The stable port reads the per-request idempotency key from async
+      // context — the singleton keeps its sandbox/session state while
+      // credits stay per-request.
+      credits: requestScopedCredits(ledger),
+    }),
+  );
+}
 
 export async function POST(request: Request): Promise<Response> {
   if (!process.env['E2B_API_KEY'] || !process.env['LLM_API_KEY']) {
@@ -73,18 +69,26 @@ export async function POST(request: Request): Promise<Response> {
     );
   }
 
+  const orchestrator = await (orchestratorPromise ??= buildOrchestrator());
+
   const encoder = new TextEncoder();
   // The stop button aborts the client fetch; the stream's cancel hook and
   // request.signal (client disconnect) both propagate into the orchestrator.
   const abort = new AbortController();
   request.signal.addEventListener('abort', () => abort.abort(), { once: true });
 
+  // One idempotency key per logical user message: retries dedupe, distinct
+  // messages budget independently. Async context carries it into the
+  // singleton orchestrator's reserve/settle calls.
+  const creditKey = keyFor(sessionId, message);
+
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       try {
-        for await (const event of orchestrator.run(sessionId, message, {
-          signal: abort.signal,
-        })) {
+        for await (const event of withRequestKey(
+          creditKey,
+          () => orchestrator.run(sessionId, message, { signal: abort.signal }),
+        )) {
           controller.enqueue(encoder.encode(encodeEvent(event)));
         }
       } catch (error) {

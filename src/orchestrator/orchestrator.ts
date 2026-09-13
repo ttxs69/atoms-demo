@@ -564,7 +564,10 @@ function parsePlanArgs(raw: string): Plan {
       // Reserve BEFORE anything exists: a blocked run must not create a
       // sandbox, run a model call, or touch the filesystem. blocked_credits
       // in the state machine is a pre-flight gate, not a failure.
-      const reservation = await deps.credits.reserve(sessionId, 0);
+      // The estimate is deliberately conservative (wayfinder: "you don't know
+      // what a request costs until it finishes") — settle trues it down.
+      const ESTIMATE_TOKENS = Number(process.env['RESERVE_ESTIMATE_TOKENS'] ?? '3000');
+      const reservation = await deps.credits.reserve(sessionId, ESTIMATE_TOKENS);
       if (!reservation.ok) {
         yield { type: 'blocked_credits', ...(reservation.resetsAt ? { resetsAt: reservation.resetsAt } : {}) };
         return;
