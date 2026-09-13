@@ -166,7 +166,8 @@ note "最快方式：如果你本地 .env 已配好，我可以生成一个可�
 if confirm "从本地 .env 生成 Raw 格式（一次粘贴全部变量）？"; then
   note "以下内容已复制到剪贴板（macOS）："
   # 排除 DATABASE_URL（Railway 自带）、注释行和空行
-  RAW_ENV=$(grep -E "^[A-Z]" .env | grep -v "^DATABASE_URL=")
+  # Strip inline comments, skip empty values, exclude DATABASE_URL (Railway provides it)
+  RAW_ENV=$(grep -E "^[A-Z]" .env | grep -v "^DATABASE_URL=" | grep -v "=$" | sed 's/\s*#.*$//')
   if command -v pbcopy >/dev/null 2>&1; then
     printf '%s\n' "$RAW_ENV" | pbcopy
     say "✓ 已复制！到 Railway → Variables → Raw Editor → 粘贴 → Update"
@@ -180,7 +181,7 @@ else
   for VAR in E2B_API_KEY LLM_PROTOCOL LLM_BASE_URL LLM_MODEL LLM_API_KEY \
     SUPABASE_URL SUPABASE_ANON_KEY SUPABASE_SECRET_KEY \
     NEXT_PUBLIC_SUPABASE_URL NEXT_PUBLIC_SUPABASE_ANON_KEY \
-    TURNSTILE_SITE_KEY TURNSTILE_SECRET_KEY \
+    TURNSTILE_SITE_KEY TURNSTILE_SECRET_KEY NEXT_PUBLIC_TURNSTILE_SITE_KEY \
     APPS_SUPABASE_URL APPS_SUPABASE_PUBLISHABLE_KEY APPS_SUPABASE_SECRET_KEY APPS_SUPABASE_DB_URL \
     ADMIN_TOKEN DAILY_CAP TOKENS_PER_POINT RESERVE_ESTIMATE_TOKENS; do
     VAL=$(_existing "$VAR" || echo "")

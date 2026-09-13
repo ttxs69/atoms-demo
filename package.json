@@ -13,7 +13,8 @@
     "build": "next build",
     "dev": "next dev --turbopack",
     "test:live": "RUN_LIVE=1 node --test --test-name-pattern='live:' test/live.test.ts",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "start": "next start"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.8",
