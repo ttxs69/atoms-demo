@@ -49,6 +49,9 @@ async function defaultSweep(): Promise<void> {
   // but the GC can fire first).
   const { PostgresCredits } = await import('../credits/ledger.ts');
   await PostgresCredits.migrate(db);
+  // The GC's own table too.
+  const { migrateGc } = await import('./engine.ts');
+  await migrateGc(db);
   const deleters: Deleters = productionDeleters({
     ...(process.env['E2B_API_KEY'] ? { e2bApiKey: process.env['E2B_API_KEY'] } : {}),
     ...(process.env['APPS_SUPABASE_DB_URL']

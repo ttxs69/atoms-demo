@@ -7,43 +7,41 @@
 # Test info
 
 - Name: journeys.spec.ts >> J6 — 身份闭环（升级→清→登录→找回） >> upgrade with email+password, clear storage, login, workspace restored
-- Location: e2e/journeys.spec.ts:87:3
+- Location: e2e/journeys.spec.ts:96:3
 
 # Error details
 
 ```
-Error: expect(locator).toBeVisible() failed
+Test timeout of 120000ms exceeded.
+```
 
-Locator: locator('.save-invite')
-Expected: visible
-Timeout: 5000ms
-Error: element(s) not found
+```
+Error: expect(locator).toContainText(expected) failed
+
+Locator: locator('.topbar')
+Expected substring: "运行中"
+Received string:    "Forge.升级保存预览"
 
 Call log:
-  - Expect "toBeVisible" locator('.save-invite') with timeout 5000ms
-  - waiting for locator('.save-invite')
+  - Expect "toContainText" locator('.topbar') with timeout 120000ms
+  - waiting for locator('.topbar')
+    2 × locator resolved to <div class="topbar">…</div>
+      - unexpected value "Forge.生成中升级保存预览"
+    234 × locator resolved to <div class="topbar">…</div>
+        - unexpected value "Forge.升级保存预览"
+  - Test timeout of 120000ms exceeded.
 
 ```
 
 ```yaml
-- text: Forge. 运行中
+- text: Forge.
 - button "升级保存"
 - button "预览"
-- region "对话":
-  - text: 1 个文件 · 已完成 1 ✓ src/App.tsx 280B
-  - group: ▸ 活动日志 · 335 条
-  - textbox "描述你想做的东西":
-    - /placeholder: 描述你想做的东西…
-  - button "开始" [disabled]
-  - text: ⌘↩ 发送
-- alert
 ```
 
 # Test source
 
 ```ts
-  1   | import { test, expect, type Page } from '@playwright/test';
-  2   | 
   3   | /**
   4   |  * forge E2E — Playwright, semantic selectors, auto-waiting assertions.
   5   |  *
@@ -56,151 +54,159 @@ Call log:
   12  |  */
   13  | 
   14  | test.beforeEach(async ({ page }) => {
-  15  |   // The Next.js dev overlay (nextjs-portal) intercepts pointer events in
-  16  |   // dev mode. Hide it via injected CSS on EVERY navigation — removing it
-  17  |   // once doesn't survive page transitions.
-  18  |   await page.addInitScript(() => {
-  19  |     const style = document.createElement('style');
-  20  |     style.textContent = 'nextjs-portal { display: none !important; pointer-events: none !important; }';
-  21  |     document.addEventListener('DOMContentLoaded', () => {
-  22  |       document.head.appendChild(style);
-  23  |     });
-  24  |   });
-  25  | });
-  26  | 
-  27  | /** Fresh visit: clear storage, reload, wait for identity to land. */
-  28  | async function freshVisit(page: Page): Promise<void> {
-  29  |   await page.goto('/');
-  30  |   await page.evaluate(() => localStorage.clear());
-  31  |   await page.reload();
-  32  |   // Identity lands when the topbar shows 升级保存 (not 连接中…)
-  33  |   await expect(page.locator('.topbar')).toContainText('升级保存', { timeout: 30_000 });
-  34  |   // Cookie is set by POST /api/auth/session — wait for it to complete
-  35  |   // (the topbar flips after setIdentity, which is AFTER the POST, but
-  36  |   // the browser needs a beat to apply Set-Cookie on some routes).
-  37  |   await page.waitForTimeout(1_000);
-  38  | }
-  39  | 
-  40  | test.describe('J1 — 陌生首访 → 生成 → 预览', () => {
-  41  |   test('empty state renders, identity is silent, generation completes, preview appears', async ({ page }) => {
-  42  |     await freshVisit(page);
-  43  | 
-  44  |     // Empty state: heading, three examples, login link (not a wall)
-  45  |     await expect(page.getByRole('heading', { name: '想做点什么？' })).toBeVisible();
-  46  |     await expect(page.getByText('记录每日心情的应用')).toBeVisible();
-  47  |     await expect(page.getByText('待办清单')).toBeVisible();
-  48  |     await expect(page.getByText('番茄钟计时器')).toBeVisible();
-  49  |     await expect(page.getByText('换设备了？登录已有账户')).toBeVisible();
-  50  | 
-  51  |     // Type and submit
-  52  |     const composer = page.getByRole('textbox', { name: '描述你想做的东西' });
-  53  |     await composer.fill('做一个极简计数器：加减按钮、当前数字显示。只要一个组件。');
-  54  |     await page.getByRole('button', { name: '开始' }).click();
-  55  | 
-  56  |     // Streaming: 停止 button appears (generation in flight)
-  57  |     await expect(page.getByRole('button', { name: /停止/ })).toBeVisible({ timeout: 15_000 });
-  58  | 
-  59  |     // Wait for completion: 顶栏 switches to 运行中
-  60  |     await expect(page.locator('.topbar')).toContainText('运行中', { timeout: 120_000 });
-  61  | 
-  62  |     // File tree appeared with at least App.tsx
-  63  |     await expect(page.locator('.files-header')).toContainText(/个文件/);
-  64  |     await expect(page.locator('.file-line', { hasText: 'src/App.tsx' })).toBeVisible();
-  65  | 
-  66  |     // Preview panel: opens on first file write, but if it didn't (timing),
-  67  |     // the topbar 预览 button expands it — robust either way.
-  68  |     const body = page.locator('.body');
-  69  |     if ((await body.getAttribute('class'))?.includes('preview-collapsed')) {
-  70  |       await page.locator('.topbar button', { hasText: '预览' }).click();
-  71  |     }
-  72  |     const iframe = page.locator('.preview-frame');
-  73  |     await expect(iframe).toBeVisible({ timeout: 10_000 });
-  74  |     const src = await iframe.getAttribute('src');
-  75  |     expect(src).toContain('.e2b.app');
-  76  | 
-  77  |     // The preview URL actually serves the app
-  78  |     const status = await page.evaluate(
-  79  |       (url) => fetch(url).then((r) => r.status),
-  80  |       src!,
-  81  |     );
-  82  |     expect(status).toBe(200);
-  83  |   });
-  84  | });
+  15  |   // Capture browser console errors — React render errors get swallowed
+  16  |   // by the removed dev overlay
+  17  |   const errors: string[] = [];
+  18  |   page.on('console', (msg) => {
+  19  |     if (msg.type() === 'error') errors.push(msg.text());
+  20  |   });
+  21  |   page.on('pageerror', (err) => errors.push(String(err)));
+  22  |   // Expose for later assertions
+  23  |   (page as unknown as { __consoleErrors: string[] }).__consoleErrors = errors;
+  24  |   // The Next.js dev overlay (nextjs-portal) intercepts pointer events in
+  25  |   // dev mode. Hide it via injected CSS on EVERY navigation — removing it
+  26  |   // once doesn't survive page transitions.
+  27  |   await page.addInitScript(() => {
+  28  |     const style = document.createElement('style');
+  29  |     style.textContent = 'nextjs-portal { display: none !important; pointer-events: none !important; }';
+  30  |     document.addEventListener('DOMContentLoaded', () => {
+  31  |       document.head.appendChild(style);
+  32  |     });
+  33  |   });
+  34  | });
+  35  | 
+  36  | /** Fresh visit: clear storage, reload, wait for identity to land. */
+  37  | async function freshVisit(page: Page): Promise<void> {
+  38  |   await page.goto('/');
+  39  |   await page.evaluate(() => localStorage.clear());
+  40  |   await page.reload();
+  41  |   // Identity lands when the topbar shows 升级保存 (not 连接中…)
+  42  |   await expect(page.locator('.topbar')).toContainText('升级保存', { timeout: 30_000 });
+  43  |   // Cookie is set by POST /api/auth/session — wait for it to complete
+  44  |   // (the topbar flips after setIdentity, which is AFTER the POST, but
+  45  |   // the browser needs a beat to apply Set-Cookie on some routes).
+  46  |   await page.waitForTimeout(1_000);
+  47  | }
+  48  | 
+  49  | test.describe('J1 — 陌生首访 → 生成 → 预览', () => {
+  50  |   test('empty state renders, identity is silent, generation completes, preview appears', async ({ page }) => {
+  51  |     await freshVisit(page);
+  52  | 
+  53  |     // Empty state: heading, three examples, login link (not a wall)
+  54  |     await expect(page.getByRole('heading', { name: '想做点什么？' })).toBeVisible();
+  55  |     await expect(page.getByText('记录每日心情的应用')).toBeVisible();
+  56  |     await expect(page.getByText('待办清单')).toBeVisible();
+  57  |     await expect(page.getByText('番茄钟计时器')).toBeVisible();
+  58  |     await expect(page.getByText('换设备了？登录已有账户')).toBeVisible();
+  59  | 
+  60  |     // Type and submit
+  61  |     const composer = page.getByRole('textbox', { name: '描述你想做的东西' });
+  62  |     await composer.fill('做一个极简计数器：加减按钮、当前数字显示。只要一个组件。');
+  63  |     await page.getByRole('button', { name: '开始' }).click();
+  64  | 
+  65  |     // Streaming: 停止 button appears (generation in flight)
+  66  |     await expect(page.getByRole('button', { name: /停止/ })).toBeVisible({ timeout: 15_000 });
+  67  | 
+  68  |     // Wait for completion: 顶栏 switches to 运行中
+  69  |     await expect(page.locator('.topbar')).toContainText('运行中', { timeout: 120_000 });
+  70  | 
+  71  |     // File tree appeared with at least App.tsx
+  72  |     await expect(page.locator('.files-header')).toContainText(/个文件/);
+  73  |     await expect(page.locator('.file-line', { hasText: 'src/App.tsx' })).toBeVisible();
+  74  | 
+  75  |     // Preview panel: opens on first file write, but if it didn't (timing),
+  76  |     // the topbar 预览 button expands it — robust either way.
+  77  |     const body = page.locator('.body');
+  78  |     if ((await body.getAttribute('class'))?.includes('preview-collapsed')) {
+  79  |       await page.locator('.topbar button', { hasText: '预览' }).click();
+  80  |     }
+  81  |     const iframe = page.locator('.preview-frame');
+  82  |     await expect(iframe).toBeVisible({ timeout: 10_000 });
+  83  |     const src = await iframe.getAttribute('src');
+  84  |     expect(src).toContain('.e2b.app');
   85  | 
-  86  | test.describe('J6 — 身份闭环（升级→清→登录→找回）', () => {
-  87  |   test('upgrade with email+password, clear storage, login, workspace restored', async ({ page }) => {
-  88  |     await freshVisit(page);
-  89  | 
-  90  |     // Generate something first (need an app to restore)
-  91  |     const composer = page.getByRole('textbox', { name: '描述你想做的东西' });
-  92  |     await composer.fill('做一个hello页面，只要一行大标题。');
-  93  |     await page.getByRole('button', { name: '开始' }).click();
-  94  |     await expect(page.locator('.topbar')).toContainText('运行中', { timeout: 120_000 });
-  95  | 
-  96  |     // Save-invite appears (or click the topbar button to bring it up)
-  97  |     const invite = page.locator('.save-invite');
-  98  |     if (!(await invite.isVisible().catch(() => false))) {
-  99  |       await page.locator('.topbar button', { hasText: '升级保存' }).click();
-  100 |     }
-> 101 |     await expect(invite).toBeVisible();
-      |                          ^ Error: expect(locator).toBeVisible() failed
-  102 | 
-  103 |     // Fill email + password, submit
-  104 |     const email = `e2e-${Date.now()}@test.dev`;
-  105 |     const password = 'e2e-pass-123';
-  106 |     await invite.locator('input[type=email]').fill(email);
-  107 |     await invite.locator('input[type=password]').fill(password);
-  108 |     await invite.getByRole('button', { name: /保住它/ }).click();
-  109 | 
-  110 |     // Upgrade succeeds → invite disappears
-  111 |     await expect(invite).toBeHidden({ timeout: 15_000 });
-  112 | 
-  113 |     // Clear storage → fresh visit → login link visible
-  114 |     await page.evaluate(() => localStorage.clear());
-  115 |     await page.reload();
-  116 |     await expect(page.getByText('换设备了？登录已有账户')).toBeVisible({ timeout: 15_000 });
-  117 | 
-  118 |     // Click login, fill credentials, submit
-  119 |     await page.getByText('换设备了？登录已有账户').click();
-  120 |     await expect(page.getByRole('heading', { name: '登录已有账户' })).toBeVisible();
+  86  |     // The preview URL actually serves the app
+  87  |     const status = await page.evaluate(
+  88  |       (url) => fetch(url).then((r) => r.status),
+  89  |       src!,
+  90  |     );
+  91  |     expect(status).toBe(200);
+  92  |   });
+  93  | });
+  94  | 
+  95  | test.describe('J6 — 身份闭环（升级→清→登录→找回）', () => {
+  96  |   test('upgrade with email+password, clear storage, login, workspace restored', async ({ page }) => {
+  97  |     await freshVisit(page);
+  98  | 
+  99  |     // Generate something first (need an app to restore)
+  100 |     const composer = page.getByRole('textbox', { name: '描述你想做的东西' });
+  101 |     await composer.fill('做一个hello页面，只要一行大标题。');
+  102 |     await page.getByRole('button', { name: '开始' }).click();
+> 103 |     await expect(page.locator('.topbar')).toContainText('运行中', { timeout: 120_000 });
+      |                                           ^ Error: expect(locator).toContainText(expected) failed
+  104 | 
+  105 |     try {
+  106 |       await expect(invite).toBeVisible({ timeout: 5_000 });
+  107 |     } catch {
+  108 |       await topbarBtn.click();
+  109 |     }
+  110 |     await expect(invite).toBeVisible({ timeout: 5_000 });
+  111 | 
+  112 |     // Fill email + password, submit
+  113 |     const email = `e2e-${Date.now()}@test.dev`;
+  114 |     const password = 'e2e-pass-123';
+  115 |     await invite.locator('input[type=email]').fill(email);
+  116 |     await invite.locator('input[type=password]').fill(password);
+  117 |     await invite.getByRole('button', { name: /保住它/ }).click();
+  118 | 
+  119 |     // Upgrade succeeds → invite disappears
+  120 |     await expect(invite).toBeHidden({ timeout: 15_000 });
   121 | 
-  122 |     const loginBox = page.locator('.login-box');
-  123 |     await loginBox.locator('input[type=email]').fill(email);
-  124 |     await loginBox.locator('input[type=password]').fill(password);
-  125 |     await loginBox.getByRole('button', { name: /^登录$/ }).click();
+  122 |     // Clear storage → fresh visit → login link visible
+  123 |     await page.evaluate(() => localStorage.clear());
+  124 |     await page.reload();
+  125 |     await expect(page.getByText('换设备了？登录已有账户')).toBeVisible({ timeout: 15_000 });
   126 | 
-  127 |     // Workspace restored: topbar shows 运行中, preview iframe back
-  128 |     await expect(page.locator('.topbar')).toContainText('运行中', { timeout: 30_000 });
-  129 |     const iframe = page.locator('.preview-frame');
-  130 |     await expect(iframe).toBeVisible();
-  131 |     expect(await iframe.getAttribute('src')).toContain('.e2b.app');
-  132 |   });
-  133 | });
-  134 | 
-  135 | test.describe('J4 — 中断不丢文件', () => {
-  136 |   test('stop mid-generation, files preserved, resume works', async ({ page }) => {
-  137 |     await freshVisit(page);
-  138 | 
-  139 |     const composer = page.getByRole('textbox', { name: '描述你想做的东西' });
-  140 |     await composer.fill('做一个多组件的看板应用：三列、可拖拽卡片、localStorage。组件拆细。');
-  141 |     await page.getByRole('button', { name: '开始' }).click();
-  142 | 
-  143 |     // Wait for generation to start, then stop it
-  144 |     await expect(page.getByRole('button', { name: /停止/ })).toBeVisible({ timeout: 15_000 });
-  145 |     // Give it a moment to write some files, then stop
-  146 |     await page.waitForTimeout(5_000);
-  147 |     await page.getByRole('button', { name: /停止/ }).click();
-  148 | 
-  149 |     // Stopped banner appears
-  150 |     await expect(page.locator('.stopped-banner')).toBeVisible({ timeout: 15_000 });
-  151 |     await expect(page.locator('.stopped-banner')).toContainText('已停止');
-  152 |     await expect(page.locator('.stopped-banner')).toContainText('文件都保留');
-  153 | 
-  154 |     // 继续刚才的 button appears
-  155 |     await expect(
-  156 |       page.locator('.stopped-banner button', { hasText: '继续刚才的' }),
-  157 |     ).toBeVisible();
-  158 |   });
-  159 | });
-  160 | 
+  127 |     // Click login, fill credentials, submit
+  128 |     await page.getByText('换设备了？登录已有账户').click();
+  129 |     await expect(page.getByRole('heading', { name: '登录已有账户' })).toBeVisible();
+  130 | 
+  131 |     const loginBox = page.locator('.login-box');
+  132 |     await loginBox.locator('input[type=email]').fill(email);
+  133 |     await loginBox.locator('input[type=password]').fill(password);
+  134 |     await loginBox.getByRole('button', { name: /^登录$/ }).click();
+  135 | 
+  136 |     // Workspace restored: topbar shows 运行中, preview iframe back
+  137 |     await expect(page.locator('.topbar')).toContainText('运行中', { timeout: 30_000 });
+  138 |     const iframe = page.locator('.preview-frame');
+  139 |     await expect(iframe).toBeVisible();
+  140 |     expect(await iframe.getAttribute('src')).toContain('.e2b.app');
+  141 |   });
+  142 | });
+  143 | 
+  144 | test.describe('J4 — 中断不丢文件', () => {
+  145 |   test('stop mid-generation, files preserved, resume works', async ({ page }) => {
+  146 |     await freshVisit(page);
+  147 | 
+  148 |     const composer = page.getByRole('textbox', { name: '描述你想做的东西' });
+  149 |     await composer.fill('做一个复杂的项目管理工具：项目列表、每个项目展开任务面板、任务有状态（待办/进行中/完成）、可拖拽排序、有进度统计仪表盘、支持标签筛选、深色模式切换。组件拆分要细，至少8个文件。');
+  150 |     await page.getByRole('button', { name: '开始' }).click();
+  151 | 
+  152 |     // Stop as soon as the stop button appears — don't wait (the
+  153 |     // generation might finish before we get to click).
+  154 |     await expect(page.getByRole('button', { name: /停止/ })).toBeVisible({ timeout: 30_000 });
+  155 |     await page.getByRole('button', { name: /停止/ }).click();
+  156 | 
+  157 |     // Stopped banner appears
+  158 |     await expect(page.locator('.stopped-banner')).toBeVisible({ timeout: 15_000 });
+  159 |     await expect(page.locator('.stopped-banner')).toContainText('已停止');
+  160 |     await expect(page.locator('.stopped-banner')).toContainText('文件都保留');
+  161 | 
+  162 |     // 继续刚才的 button appears
+  163 |     await expect(
+  164 |       page.locator('.stopped-banner button', { hasText: '继续刚才的' }),
+  165 |     ).toBeVisible();
+  166 |   });
+  167 | });
+  168 | 
 ```

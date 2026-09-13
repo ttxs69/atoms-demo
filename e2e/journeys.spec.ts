@@ -12,6 +12,15 @@ import { test, expect, type Page } from '@playwright/test';
  */
 
 test.beforeEach(async ({ page }) => {
+  // Capture browser console errors — React render errors get swallowed
+  // by the removed dev overlay
+  const errors: string[] = [];
+  page.on('console', (msg) => {
+    if (msg.type() === 'error') errors.push(msg.text());
+  });
+  page.on('pageerror', (err) => errors.push(String(err)));
+  // Expose for later assertions
+  (page as unknown as { __consoleErrors: string[] }).__consoleErrors = errors;
   // The Next.js dev overlay (nextjs-portal) intercepts pointer events in
   // dev mode. Hide it via injected CSS on EVERY navigation — removing it
   // once doesn't survive page transitions.
@@ -93,12 +102,12 @@ test.describe('J6 — 身份闭环（升级→清→登录→找回）', () => {
     await page.getByRole('button', { name: '开始' }).click();
     await expect(page.locator('.topbar')).toContainText('运行中', { timeout: 120_000 });
 
-    // Save-invite appears (or click the topbar button to bring it up)
-    const invite = page.locator('.save-invite');
-    if (!(await invite.isVisible().catch(() => false))) {
-      await page.locator('.topbar button', { hasText: '升级保存' }).click();
+    try {
+      await expect(invite).toBeVisible({ timeout: 5_000 });
+    } catch {
+      await topbarBtn.click();
     }
-    await expect(invite).toBeVisible();
+    await expect(invite).toBeVisible({ timeout: 5_000 });
 
     // Fill email + password, submit
     const email = `e2e-${Date.now()}@test.dev`;
@@ -137,13 +146,12 @@ test.describe('J4 — 中断不丢文件', () => {
     await freshVisit(page);
 
     const composer = page.getByRole('textbox', { name: '描述你想做的东西' });
-    await composer.fill('做一个多组件的看板应用：三列、可拖拽卡片、localStorage。组件拆细。');
+    await composer.fill('做一个复杂的项目管理工具：项目列表、每个项目展开任务面板、任务有状态（待办/进行中/完成）、可拖拽排序、有进度统计仪表盘、支持标签筛选、深色模式切换。组件拆分要细，至少8个文件。');
     await page.getByRole('button', { name: '开始' }).click();
 
-    // Wait for generation to start, then stop it
-    await expect(page.getByRole('button', { name: /停止/ })).toBeVisible({ timeout: 15_000 });
-    // Give it a moment to write some files, then stop
-    await page.waitForTimeout(5_000);
+    // Stop as soon as the stop button appears — don't wait (the
+    // generation might finish before we get to click).
+    await expect(page.getByRole('button', { name: /停止/ })).toBeVisible({ timeout: 30_000 });
     await page.getByRole('button', { name: /停止/ }).click();
 
     // Stopped banner appears

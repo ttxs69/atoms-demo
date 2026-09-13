@@ -102,7 +102,9 @@ export function Workspace() {
   const [identity, setIdentity] = useState<string | null>(null);
   // 升级是匿名身份唯一的保存路径——首次预览出现时主动邀请，而不是
   // 把它埋在顶栏小按钮里等人发现。
-  const [saveInvite, setSaveInvite] = useState(false);
+  const [saveInviteDismissed, setSaveInviteDismissed] = useState(
+    () => typeof window !== 'undefined' && !!localStorage.getItem('forge-save-dismissed'),
+  );
   const [saveEmail, setSaveEmail] = useState('');
   const [savePassword, setSavePassword] = useState('');
   const [saving, setSaving] = useState(false);
@@ -168,7 +170,6 @@ export function Workspace() {
       // actually refreshes to the new build.
       setPreviewUrl(event.url);
       setPreviewNonce((n) => n + 1);
-      maybeOfferSave();
     } else if (event.type === 'interrupted') {
       setStopped(true);
     } else if (event.type === 'gate_failed') {
@@ -403,8 +404,7 @@ export function Workspace() {
             if (res.ok) {
               const data2 = (await res.json()) as { url?: string; files?: string[] };
               if (data2.url) {
-                maybeOfferSave();
-                setPreviewUrl(data2.url);
+                          setPreviewUrl(data2.url);
                 setPreviewNonce((n) => n + 1);
                 setPreviewOpen(true);
                 if (data2.files && data2.files.length > 0) {
@@ -467,8 +467,7 @@ export function Workspace() {
         if (res.ok) {
           const d = (await res.json()) as { url?: string; files?: string[] };
           if (d.url) {
-            maybeOfferSave();
-            setPreviewUrl(d.url);
+                  setPreviewUrl(d.url);
             setPreviewNonce((n) => n + 1);
             setPreviewOpen(true);
             if (d.files?.length) {
@@ -515,14 +514,6 @@ export function Workspace() {
     }
   }, []);
 
-  const maybeOfferSave = useCallback(() => {
-    if (typeof window === 'undefined') return;
-    if (localStorage.getItem('forge-save-dismissed')) return;
-    // Dev 降级身份没有 Supabase，升级端点会 503——不出邀请。
-    if (identity?.startsWith('dev-')) return;
-    setSaveInvite(true);
-  }, [identity]);
-
   const submitSave = useCallback(async () => {
     if (!saveEmail.includes('@') || savePassword.length < 6) return;
     setSaving(true);
@@ -534,7 +525,7 @@ export function Workspace() {
       });
       if (res.ok) {
         setUpgraded(true);
-        setSaveInvite(false);
+        setSaveInviteDismissed(true);
         localStorage.setItem('forge-save-dismissed', '1');
       } else {
         const data = (await res.json().catch(() => null)) as { error?: string } | null;
@@ -619,7 +610,7 @@ export function Workspace() {
           upgraded ? (
             <span className="pill ok">已绑定邮箱</span>
           ) : (
-            <button type="button" className="btn small" onClick={() => setSaveInvite(true)} title={identity}>
+            <button type="button" className="btn small" onClick={() => setSaveInviteDismissed(false)} title={identity}>
               升级保存
             </button>
           )
@@ -789,7 +780,7 @@ export function Workspace() {
             )}
 
 
-            {saveInvite && !upgraded ? (
+            {previewUrl && !upgraded && !saveInviteDismissed ? (
               <div className="save-invite">
                 <div className="save-title">🎉 应用跑起来了 —— 想保住它吗？</div>
                 <p className="save-note">
@@ -825,7 +816,7 @@ export function Workspace() {
                     type="button"
                     className="btn"
                     onClick={() => {
-                      setSaveInvite(false);
+                      setSaveInviteDismissed(true);
                       localStorage.setItem('forge-save-dismissed', '1');
                     }}
                   >
