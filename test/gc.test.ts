@@ -117,3 +117,40 @@ test('failures back off, retry when due, and flip to failed after 5 strikes', as
   const r6 = await sweep(db, flaky, t);
   assert.equal(r6.failed + r6.executed, 0);
 });
+
+// ─── ticket 02: the delete-project entry enqueues and sweeps ──────────────
+
+import { DELETE as deleteWorkspace } from '../src/app/api/workspace/route.ts';
+
+test('DELETE /api/workspace enqueues all four targets for the session user', async () => {
+  // 与路由共享同一个平台 client（ledgerDb 的进程级单例）
+  const { ledgerDb } = await import('../src/credits/route-credits.ts');
+  const db = await ledgerDb();
+  await PostgresCredits.migrate(db);
+  await migrateGc(db);
+  await db.query(
+    `INSERT INTO credit_ledger (user_id, day, kind, amount, idempotency_key)
+     VALUES ('dev-ws', CURRENT_DATE, 'reserve', -1, 'k')
+     ON CONFLICT (idempotency_key) DO NOTHING`,
+  );
+  delete process.env['E2B_API_KEY'];
+  const res = await deleteWorkspace(
+    new Request('http://x/api/workspace', {
+      method: 'DELETE',
+      headers: { 'x-dev-session': 'dev-ws' },
+    }),
+  );
+  assert.equal(res.status, 200);
+  const rows = await db.query<{ target: string; state: string }>(
+    `SELECT target, state FROM deletion_queue WHERE workspace_id = 'dev-ws' ORDER BY id`,
+  );
+  assert.deepEqual(
+    rows.rows.map((r) => r.target),
+    ['sandbox', 'supabase_rows', 'forge_rows', 'auth_user'],
+  );
+  // Degraded deleters are no-ops → everything completed.
+  assert.ok(rows.rows.every((r) => r.state === 'done'));
+  // Platform rows really are gone (the one deleter with a live db here).
+  const left = await db.query(`SELECT 1 FROM credit_ledger WHERE user_id = 'dev-ws'`);
+  assert.equal(left.rows.length, 0);
+});

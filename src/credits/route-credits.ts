@@ -13,10 +13,15 @@ import type { CreditsPort } from '../ports/credits-port.ts';
  */
 
 let portPromise: Promise<PostgresCredits> | null = null;
+let dbPromise: Promise<SqlClient & { transaction?: unknown }> | null = null;
 
-async function createPort(): Promise<PostgresCredits> {
-  const cap = Number(process.env['DAILY_CAP'] ?? '100');
-  const tokensPerPoint = Number(process.env['TOKENS_PER_POINT'] ?? '10000');
+/** The shared platform client — credits AND the GC queue live on it. */
+export function ledgerDb(): Promise<SqlClient & { transaction?: unknown }> {
+  dbPromise ??= createDb();
+  return dbPromise;
+}
+
+async function createDb(): Promise<SqlClient & { transaction?: unknown }> {
 
   if (process.env['DATABASE_URL']) {
     // Lazy import keeps node-postgres out of the dev/test path.
@@ -36,8 +41,7 @@ async function createPort(): Promise<PostgresCredits> {
     };
     const wrapped = client as unknown as SqlClient & { transaction: typeof tx };
     wrapped.transaction = tx;
-    await PostgresCredits.migrate(wrapped);
-    return new PostgresCredits(wrapped, { dailyCap: cap, tokensPerPoint });
+    return wrapped;
   }
 
   const db = new PGlite();
@@ -54,8 +58,15 @@ async function createPort(): Promise<PostgresCredits> {
   };
   const wrapped = db as unknown as SqlClient & { transaction: typeof tx };
   wrapped.transaction = tx;
-  await PostgresCredits.migrate(wrapped);
-  return new PostgresCredits(wrapped, { dailyCap: cap, tokensPerPoint });
+  return wrapped;
+}
+
+async function createPort(): Promise<PostgresCredits> {
+  const cap = Number(process.env['DAILY_CAP'] ?? '100');
+  const tokensPerPoint = Number(process.env['TOKENS_PER_POINT'] ?? '10000');
+  const db = await ledgerDb();
+  await PostgresCredits.migrate(db);
+  return new PostgresCredits(db, { dailyCap: cap, tokensPerPoint });
 }
 
 export function ledgerPort(): Promise<PostgresCredits> {
