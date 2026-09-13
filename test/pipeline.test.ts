@@ -731,10 +731,11 @@ test('a migration file routes through migrating; the gate receives INJECTED SQL'
     credits: new FakeCredits(),
     gate: {
       check: async (ctx) => {
-        seen.push({
-          sql: ctx.migrationSql,
-          ...(ctx.workspaceId !== undefined ? { workspaceId: ctx.workspaceId } : {}),
-        });
+        if (ctx.migrationSql !== undefined) seen.push({ sql: ctx.migrationSql });
+        if (ctx.workspaceId !== undefined) {
+          const last = seen[seen.length - 1];
+          if (last) last.workspaceId = ctx.workspaceId;
+        }
         return { ok: true } as const;
       },
     },
