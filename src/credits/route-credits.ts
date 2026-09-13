@@ -26,7 +26,12 @@ async function createDb(): Promise<SqlClient & { transaction?: unknown }> {
   if (process.env['DATABASE_URL']) {
     // Lazy import keeps node-postgres out of the dev/test path.
     const { Client } = await import('pg');
-    const client = new Client({ connectionString: process.env['DATABASE_URL'] });
+    const client = new Client({
+      connectionString: process.env['DATABASE_URL'],
+      // Managed Postgres (Supabase pooler / Railway) requires TLS; a local
+      // plain Postgres just ignores the upgrade request.
+      ssl: { rejectUnauthorized: false },
+    });
     await client.connect();
     const tx = async <T,>(fn: (c: SqlClient) => Promise<T>): Promise<T> => {
       await client.query('BEGIN');

@@ -24,7 +24,11 @@ async function buildGate() {
   const dbUrl = process.env['APPS_SUPABASE_DB_URL'];
   if (!dbUrl) return undefined; // degraded: no shared project, gate absent
   const { Client } = await import('pg');
-  const client = new Client({ connectionString: dbUrl });
+  const client = new Client({
+    connectionString: dbUrl,
+    // Supabase's pooler requires TLS to connect at all.
+    ssl: { rejectUnauthorized: false },
+  });
   await client.connect();
   const tx = async <T,>(fn: (c: import('../../../credits/ledger.ts').SqlClient) => Promise<T>): Promise<T> => {
     await client.query('BEGIN');
