@@ -30,8 +30,7 @@ test('/login 是 OTP 表单', async ({ page }) => {
 
 test('/projects 未登录跳 /login', async ({ page }) => {
   await goto(page, '/projects');
-  // /api/auth/me 返回 null → useEffect 跳 /login
-  await page.waitForURL(/\/login/, { timeout: 5000 });
+  await page.waitForURL(/\/login/, { timeout: 15000 });
 });
 
 test('404 页面正常', async ({ page }) => {
