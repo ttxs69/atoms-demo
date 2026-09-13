@@ -61,6 +61,7 @@ fi
 echo "▸ 启动 Next.js (端口 $PORT)…"
 
 NODE_PID=""
+CF_PID=""
 cleanup() {
   echo ""
   echo "▸ 停止…"
@@ -112,7 +113,7 @@ fi
 echo "▸ 启动 Cloudflare Tunnel…"
 
 # 输出重定向到临时文件，从文件读 URL（避免 pipe/subshell PID 问题）
-CF_LOG=$(mktemp /tmp/forge-tunnel-XXXXXX.log)
+CF_LOG="/tmp/forge-tunnel-$(date +%s)-$$.log"
 cloudflared tunnel --url "http://localhost:$PORT" >"$CF_LOG" 2>&1 &
 CF_PID=$!
 
