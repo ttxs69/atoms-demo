@@ -97,3 +97,28 @@ test('settle is idempotent too — a retried settle does not double-book spend',
   const snap = await credits.snapshot('u1');
   assert.deepEqual(snap, { reserved: 0, spent: 4 }, 'settled once');
 });
+
+// ─── tickets 06/07: bans and daily aggregates ─────────────────────────────
+
+test('bans: ban blocks, unban releases, list round-trips', async () => {
+  const { credits } = await makeLedger(10);
+  assert.equal(await credits.isBanned('u9'), false);
+  await credits.ban('u9', 'abuse');
+  assert.equal(await credits.isBanned('u9'), true);
+  assert.deepEqual(await credits.listBans(), [{ user_id: 'u9', reason: 'abuse' }]);
+  await credits.unban('u9');
+  assert.equal(await credits.isBanned('u9'), false);
+});
+
+test('dailyStats: distinct users and settled generations for the day', async () => {
+  const { credits } = await makeLedger(10);
+  await credits.reserve('u1', 1000, { idempotencyKey: 'k1' });
+  await credits.settle('u1', 900, { idempotencyKey: 'k1' });
+  await credits.reserve('u2', 1000, { idempotencyKey: 'k2' });
+  await credits.settle('u2', 800, { idempotencyKey: 'k2' });
+  await credits.reserve('u1', 1000, { idempotencyKey: 'k3' });
+  await credits.settle('u1', 700, { idempotencyKey: 'k3' });
+  const stats = await credits.dailyStats();
+  assert.equal(stats.activeUsers, 2);
+  assert.equal(stats.generations, 3);
+});

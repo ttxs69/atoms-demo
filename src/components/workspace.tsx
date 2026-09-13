@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { AGENT_NAMES, AGENT_ROLE_LABELS, type AgentHandle } from '../domain/roles.ts';
 import type { StreamEvent } from '../domain/events.ts';
 import { decodeEvents } from '../transport/sse.ts';
@@ -99,6 +99,7 @@ export function Workspace() {
   const [previewNonce, setPreviewNonce] = useState(0);
   const [stopped, setStopped] = useState(false);
   const [gateFinding, setGateFinding] = useState<{ code: string; detail: string } | null>(null);
+  const [identity, setIdentity] = useState<string | null>(null);
   const [pane, setPane] = useState<'preview' | 'code'>('preview');
   const [previewOpen, setPreviewOpen] = useState(false);
   const [codeFiles, setCodeFiles] = useState<string[]>([]);
@@ -319,6 +320,51 @@ export function Workspace() {
     }
   }, []);
 
+  // Silent anonymous sign-in on mount: zero forms, zero clicks. The server
+  // validates and sets the httpOnly cookie the generate route trusts.
+  useEffect(() => {
+    void (async () => {
+      try {
+        const { createClient } = await import('@supabase/supabase-js');
+        const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+        const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+        if (!url || !anonKey) {
+          // Dev without a platform project: X-Dev-Session keeps local flows alive.
+          setIdentity(`dev-${Math.random().toString(36).slice(2, 8)}`);
+          return;
+        }
+        const supabase = createClient(url, anonKey);
+        const { data } = await supabase.auth.signInAnonymously();
+        if (data.session?.access_token) {
+          await fetch('/api/auth/session', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ accessToken: data.session.access_token }),
+          });
+          setIdentity(data.user?.id ?? null);
+        }
+      } catch {
+        setIdentity(null);
+      }
+    })();
+  }, []);
+
+  const upgrade = useCallback(async () => {
+    const email = window.prompt('输入邮箱，把工作区升级为永久账户：');
+    if (!email) return;
+    const res = await fetch('/api/auth/upgrade', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email }),
+    });
+    if (res.ok) {
+      window.alert('升级成功 —— 换设备也能找回了。');
+    } else {
+      const data = (await res.json().catch(() => null)) as { error?: string } | null;
+      window.alert(data?.error ?? '升级失败，请稍后再试。');
+    }
+  }, []);
+
   const submit = useCallback(async () => {
     const message = input.trim();
     if (message.length === 0 || streaming) return;
@@ -340,8 +386,11 @@ export function Workspace() {
       const response = await fetch('/api/generate', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ sessionId: sessionIdRef.current, message }),
+        body: JSON.stringify({ message }),
         signal: controller.signal,
+        ...(identity?.startsWith('dev-')
+          ? { headers: { 'content-type': 'application/json', 'x-dev-session': sessionIdRef.current } }
+          : {}),
       });
 
       if (!response.ok || !response.body) {
@@ -385,6 +434,13 @@ export function Workspace() {
         {!streaming && !gateFinding && previewUrl ? (
           <span className="pill ok">运行中</span>
         ) : null}
+        {identity ? (
+          <button type="button" className="btn small" onClick={() => void upgrade()} title={identity}>
+            升级保存
+          </button>
+        ) : (
+          <span className="pill">连接中…</span>
+        )}
         <button
           type="button"
           className="btn small"

@@ -31,6 +31,11 @@ CREATE TABLE IF NOT EXISTS quota (
   spent    int NOT NULL DEFAULT 0,
   PRIMARY KEY (user_id, day)
 );
+CREATE TABLE IF NOT EXISTS bans (
+  user_id   text PRIMARY KEY,
+  reason    text NOT NULL DEFAULT '',
+  created_at timestamptz NOT NULL DEFAULT now()
+);
 CREATE TABLE IF NOT EXISTS credit_ledger (
   id              serial PRIMARY KEY,
   user_id         text NOT NULL,
@@ -165,6 +170,47 @@ export class PostgresCredits {
         [sessionId, day, actualPoints, settleKey],
       );
     });
+  }
+
+  async isBanned(userId: string): Promise<boolean> {
+    const r = await this.#db.query(`SELECT 1 FROM bans WHERE user_id = $1`, [userId]);
+    return r.rows.length > 0;
+  }
+
+  async ban(userId: string, reason = ''): Promise<void> {
+    await this.#db.query(
+      `INSERT INTO bans (user_id, reason) VALUES ($1, $2) ON CONFLICT (user_id) DO UPDATE SET reason = $2`,
+      [userId, reason],
+    );
+  }
+
+  async unban(userId: string): Promise<void> {
+    await this.#db.query(`DELETE FROM bans WHERE user_id = $1`, [userId]);
+  }
+
+  async listBans(): Promise<{ user_id: string; reason: string }[]> {
+    const r = await this.#db.query<{ user_id: string; reason: string }>(
+      `SELECT user_id, reason FROM bans ORDER BY created_at DESC`,
+    );
+    return r.rows;
+  }
+
+  /** Admin aggregates: active identities and today's settled generations. */
+  async dailyStats(
+    day = todayUtc(),
+  ): Promise<{ activeUsers: number; generations: number }> {
+    const users = await this.#db.query<{ n: string }>(
+      `SELECT COUNT(DISTINCT user_id) AS n FROM credit_ledger WHERE day = $1`,
+      [day],
+    );
+    const gens = await this.#db.query<{ n: string }>(
+      `SELECT COUNT(*) AS n FROM credit_ledger WHERE day = $1 AND kind = 'settle'`,
+      [day],
+    );
+    return {
+      activeUsers: Number(users.rows[0]?.n ?? 0),
+      generations: Number(gens.rows[0]?.n ?? 0),
+    };
   }
 
   /** Introspection for the admin panel and tests. */

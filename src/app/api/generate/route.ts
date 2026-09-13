@@ -83,6 +83,11 @@ export async function POST(request: Request): Promise<Response> {
 
   const orchestrator = await (orchestratorPromise ??= buildOrchestrator());
 
+  // Banned identities stop before anything meterable happens.
+  if (await (await ledgerPort()).isBanned(sessionId)) {
+    return Response.json({ error: '该账号已被停用。' }, { status: 403 });
+  }
+
   const encoder = new TextEncoder();
   // The stop button aborts the client fetch; the stream's cancel hook and
   // request.signal (client disconnect) both propagate into the orchestrator.
