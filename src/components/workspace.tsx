@@ -365,10 +365,18 @@ export function Workspace() {
         // previous workspace. supabase-js persists sessions in localStorage.
         const existing = await supabase.auth.getSession();
         if (!existing.data.session) {
-          // 没有会话：可能是一台新设备。不马上匿名——先让用户选
-          // （登录旧账户 vs 直接开始）。选择之前不建立身份。
-          setShowLogin(true);
-          setIdentity(null);
+          // 无会话 = 大多数情况是陌生新访客：静默匿名开始，零摩擦是根基。
+          // 换设备回来的老用户走空状态里的「登录已有账户」链接。
+          const fresh = await supabase.auth.signInAnonymously();
+          if (fresh.data.session?.access_token && fresh.data.user) {
+            sessionIdRef.current = fresh.data.user.id;
+            setIdentity(fresh.data.user.id);
+            await fetch('/api/auth/session', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ accessToken: fresh.data.session.access_token }),
+            });
+          }
           return;
         }
         const session = existing.data.session;
@@ -619,7 +627,7 @@ export function Workspace() {
               <>
               {showLogin ? (
                 <div className="empty">
-                  <h1>欢迎回来</h1>
+                  <h1>登录已有账户</h1>
                   <p>登录已保存的账户，找回你的应用；或直接匿名开始一个新的。</p>
                   <div className="login-box">
                     <input
@@ -657,6 +665,11 @@ export function Workspace() {
               {!showLogin ? (
               <div className="empty">
                 <h1>想做点什么？</h1>
+                <p className="returning-link">
+                  <button type="button" className="linklike" onClick={() => setShowLogin(true)}>
+                    换设备了？登录已有账户
+                  </button>
+                </p>
                 <p>
                   描述你想要的网站或工具，Alex 会把它建出来。
                   <br />

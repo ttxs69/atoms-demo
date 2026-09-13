@@ -670,3 +670,12 @@ details.activity .log {
   color: var(--err);
   font-size: 12px;
 }
+
+/* Returning-user link on the empty state ---------------------------------- */
+.returning-link { margin-bottom: 4px; }
+.linklike {
+  color: var(--accent);
+  font-size: 12px;
+  text-decoration: underline;
+  padding: 0;
+}
