@@ -112,7 +112,10 @@ export function Workspace() {
   const [planFiles, setPlanFiles] = useState<FileEntry[]>([]);
 
   // One session for the lifetime of the tab. Persisting it is ticket 07's job.
-  const sessionIdRef = useRef<string>(`s-${Date.now()}`);
+  // Stable initial value — Date.now()/Math.random() in render causes
+  // hydration mismatches (SSR renders once, client again). The real id is
+  // assigned client-side in the identity effect below.
+  const sessionIdRef = useRef<string>('');
   // Raw tool arguments per call id, so a path can be recovered mid-stream.
   const toolArgsRef = useRef(new Map<string, string>());
 
@@ -330,7 +333,9 @@ export function Workspace() {
         const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
         if (!url || !anonKey) {
           // Dev without a platform project: X-Dev-Session keeps local flows alive.
-          setIdentity(`dev-${Math.random().toString(36).slice(2, 8)}`);
+          const devId = `dev-${Math.random().toString(36).slice(2, 8)}`;
+          sessionIdRef.current = devId;
+          setIdentity(devId);
           return;
         }
         const supabase = createClient(url, anonKey);
@@ -341,6 +346,7 @@ export function Workspace() {
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify({ accessToken: data.session.access_token }),
           });
+          sessionIdRef.current = data.user?.id ?? '';
           setIdentity(data.user?.id ?? null);
         }
       } catch {
@@ -368,6 +374,7 @@ export function Workspace() {
   const submit = useCallback(async () => {
     const message = input.trim();
     if (message.length === 0 || streaming) return;
+    if (!sessionIdRef.current) return; // identity still connecting
 
     setInput('');
     setFatal(null);
@@ -730,13 +737,15 @@ export function Workspace() {
               </>
             ) : null}
             <div className="spacer" />
-            <a
-              className="btn small"
-              href={`/api/export?session=${encodeURIComponent(sessionIdRef.current)}`}
-              download
-            >
-              导出 zip
-            </a>
+            {identity ? (
+              <a
+                className="btn small"
+                href={`/api/export?session=${encodeURIComponent(sessionIdRef.current)}`}
+                download
+              >
+                导出 zip
+              </a>
+            ) : null}
             {previewUrl ? (
               <a className="pill" href={previewUrl} target="_blank" rel="noopener noreferrer">
                 ↗ 新标签页
