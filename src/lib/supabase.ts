@@ -18,9 +18,9 @@ export function platformSupabase(): SupabaseClient {
 let appsCached: SupabaseClient | null = null;
 export function appsSupabase(): SupabaseClient {
   if (appsCached) return appsCached;
-  const url = process.env.NEXT_PUBLIC_APPS_SUPABASE_URL;
-  const anonKey = process.env.NEXT_PUBLIC_APPS_SUPABASE_PUBLISHABLE_KEY;
-  if (!url || !anonKey) throw new Error('NEXT_PUBLIC_APPS_SUPABASE_URL / NEXT_PUBLIC_APPS_SUPABASE_PUBLISHABLE_KEY not set');
+  const url = process.env['APPS_SUPABASE_URL'];
+  const anonKey = process.env['APPS_SUPABASE_PUBLISHABLE_KEY'];
+  if (!url || !anonKey) throw new Error('APPS_SUPABASE_URL / APPS_SUPABASE_PUBLISHABLE_KEY not set');
   appsCached = createClient(url, anonKey, {
     auth: { persistSession: false },
   });
