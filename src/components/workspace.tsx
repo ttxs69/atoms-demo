@@ -102,6 +102,7 @@ export function Workspace() {
   const [identity, setIdentity] = useState<string | null>(null);
   // 升级是匿名身份唯一的保存路径——首次预览出现时主动邀请，而不是
   // 把它埋在顶栏小按钮里等人发现。
+  const [manualUpgrade, setManualUpgrade] = useState(false);
   const [saveInviteDismissed, setSaveInviteDismissed] = useState(
     () => typeof window !== 'undefined' && !!localStorage.getItem('forge-save-dismissed'),
   );
@@ -528,6 +529,7 @@ export function Workspace() {
       if (res.ok) {
         setUpgraded(true);
         setSaveInviteDismissed(true);
+        setManualUpgrade(false);
         localStorage.setItem('forge-save-dismissed', '1');
       } else {
         const data = (await res.json().catch(() => null)) as { error?: string } | null;
@@ -612,7 +614,7 @@ export function Workspace() {
           upgraded ? (
             <span className="pill ok">已绑定邮箱</span>
           ) : (
-            <button type="button" className="btn small" onClick={() => setSaveInviteDismissed(false)} title={identity}>
+            <button type="button" className="btn small" onClick={() => { setManualUpgrade(true); setSaveInviteDismissed(false); }} title={identity}>
               升级保存
             </button>
           )
@@ -784,7 +786,7 @@ export function Workspace() {
             )}
 
 
-            {previewUrl && !upgraded && !saveInviteDismissed ? (
+            {(previewUrl || manualUpgrade) && !upgraded && !saveInviteDismissed ? (
               <div className="save-invite">
                 <div className="save-title">🎉 应用跑起来了 —— 想保住它吗？</div>
                 <p className="save-note">
@@ -821,6 +823,7 @@ export function Workspace() {
                     className="btn"
                     onClick={() => {
                       setSaveInviteDismissed(true);
+                      setManualUpgrade(false);
                       localStorage.setItem('forge-save-dismissed', '1');
                     }}
                   >
