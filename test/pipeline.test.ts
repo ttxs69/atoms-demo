@@ -704,8 +704,8 @@ test('usage chunks flow into settle and agent_done', async () => {
 
   const events = await collect(orchestrator.run('s-usage', 'go'));
 
-  assert.equal(credits.settlements[0]?.actualTokens, 480, '100+200+50+150+10+20');
+  assert.equal(credits.settlements[0]?.actualTokens, 530, '100+200+50+150+10+20');
   const done = events.find((e) => e.type === 'agent_done' && e.agentHandle === 'eng');
-  assert.equal((done as { creditsUsed: number }).creditsUsed, 480);
+  assert.equal((done as { creditsUsed: number }).creditsUsed, 530);
 });
 const PLAN_DONE = [{ type: 'tool_call_start' as const, toolCallId: 'p1', toolName: 'plan_files' }, { type: 'tool_input_delta' as const, toolCallId: 'p1', argsDelta: '{"files":["src/App.tsx"],"description":"d"}' }, { type: 'tool_call_end' as const, toolCallId: 'p1' }];
