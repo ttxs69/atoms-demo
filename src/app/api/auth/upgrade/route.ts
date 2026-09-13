@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
-import { SESSION_COOKIE, sessionVerifierFromEnv } from '../../../../auth/session.ts';
+import { sessionVerifierFromEnv } from '../../../../auth/session.ts';
 
 export const runtime = 'nodejs';
 
@@ -28,33 +28,23 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   const url = process.env['SUPABASE_URL'];
-  const anonKey = process.env['SUPABASE_ANON_KEY'];
-  if (!url || !anonKey) {
+  const serviceKey = process.env['SUPABASE_SECRET_KEY'];
+  if (!url || !serviceKey) {
     return Response.json(
       { error: 'Platform Supabase is not configured (dev mode).' },
       { status: 503 },
     );
   }
 
-  const token = readCookie(request.headers.get('cookie'));
-  const client = createClient(url, anonKey);
-  const { error } = await client.auth.updateUser(
-    { email },
-    // The caller's own token authorizes the update on their own account.
-    { headers: { Authorization: `Bearer ${token}` } } as never,
-  );
+  // Server-side there is no session — auth.updateUser would act on nobody.
+  // The service key's admin API updates the user the cookie identified.
+  const admin = createClient(url, serviceKey, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  });
+  const { error } = await admin.auth.admin.updateUserById(userId, { email });
   if (error) {
     return Response.json({ error: `升级失败：${error.message}` }, { status: 400 });
   }
 
   return Response.json({ ok: true, email });
-}
-
-function readCookie(header: string | null): string {
-  if (!header) return '';
-  for (const part of header.split(';')) {
-    const [name, ...rest] = part.trim().split('=');
-    if (name === SESSION_COOKIE) return decodeURIComponent(rest.join('='));
-  }
-  return '';
 }
