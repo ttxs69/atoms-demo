@@ -7,6 +7,13 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { AGENT_NAMES, AGENT_ROLE_LABELS, type AgentHandle } from '../domain/roles.ts';
 import type { StreamEvent } from '../domain/events.ts';
 import { decodeEvents } from '../transport/sse.ts';
@@ -106,6 +113,7 @@ export function Workspace() {
   const [stopped, setStopped] = useState(false);
   const [gateFinding, setGateFinding] = useState<{ code: string; detail: string } | null>(null);
   const [identity, setIdentity] = useState<string | null>(null);
+  const [userEmail, setUserEmail] = useState<string | null>(null);
   const [upgraded, setUpgraded] = useState(false);
   const [pane, setPane] = useState<'preview' | 'code'>('preview');
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -311,6 +319,21 @@ export function Workspace() {
   // to dev mode — if Supabase is down or unreachable, users still see a
   // working app instead of hanging on "连接中".
   useEffect(() => {
+    // First: check if logged-in user exists (cookie-based)
+    void (async () => {
+      try {
+        const res = await fetch('/api/auth/me');
+        const data = (await res.json()) as { user: { id: string; email: string } | null };
+        if (data.user) {
+          sessionIdRef.current = data.user.id;
+          setIdentity(data.user.id);
+          setUserEmail(data.user.email);
+        }
+      } catch {
+        /* not logged in, continue anonymous */
+      }
+    })();
+
     let cancelled = false;
     const timeoutId = setTimeout(() => {
       if (cancelled || sessionIdRef.current) return;
@@ -413,6 +436,12 @@ export function Workspace() {
   }, []);
 
 
+  const signOut = useCallback(async () => {
+    await fetch('/api/auth/signout', { method: 'POST' });
+    setUserEmail(null);
+    window.location.href = '/';
+  }, []);
+
   const submit = useCallback(async () => {
     const message = input.trim();
     if (message.length === 0 || streaming) return;
@@ -483,18 +512,32 @@ export function Workspace() {
           {!streaming && !gateFinding && previewUrl ? (
             <Badge variant="default" className="bg-emerald-500">运行中</Badge>
           ) : null}
-          {identity ? (
-            upgraded ? (
-              <Badge variant="default" className="bg-emerald-500">已绑定邮箱</Badge>
-            ) : (
-              <a
-                href="/login"
-                title={identity}
-                className="inline-flex items-center justify-center rounded-md text-sm font-medium border border-input bg-background hover:bg-accent h-7 px-2.5 transition-colors"
-              >
-                升级保存
-              </a>
-            )
+          {identity && userEmail ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger className="inline-flex items-center justify-center size-7 rounded-full bg-primary text-primary-foreground text-xs font-semibold hover:bg-primary/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                {userEmail.charAt(0).toUpperCase()}
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="min-w-48">
+                <div className="px-2 py-1.5 text-xs text-muted-foreground">
+                  {userEmail}
+                </div>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => (window.location.href = '/projects')}>
+                  我的项目
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => void signOut()}>
+                  退出登录
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : identity ? (
+            <a
+              href="/login"
+              title={identity}
+              className="inline-flex items-center justify-center rounded-md text-sm font-medium border border-input bg-background hover:bg-accent h-7 px-2.5 transition-colors"
+            >
+              升级保存
+            </a>
           ) : (
             <Badge variant="secondary">连接中…</Badge>
           )}

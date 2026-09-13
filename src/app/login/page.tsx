@@ -1,54 +1,63 @@
 'use client';
 
 /**
- * /login — 魔法链接登录（零密码）。
+ * /login — OTP 邮件验证码登录。
  *
- * 最佳实践：Linear、Notion、Slack、Vercel 都用这种。
- * 输入邮箱 → 收邮件 → 点链接 = 登录 + 邮箱验证（同一动作）。
- * 无密码管理 → 无密码泄露 → 无需密码二次确认。
+ * 为什么用 OTP 而非 magic link：magic link 依赖 Supabase 仪表板的 SITE_URL
+ * 配置，目前是 localhost，会让邮件链接跳转到 localhost。
+ * OTP 6 位数字码不需要 SITE_URL，也不依赖浏览器跳转。
+ *
+ * 体验：输入邮箱 → 收邮件 → 输入 6 位码 → 登录。
  */
 
-import { useEffect, useState } from 'react';
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import { Auth } from '@supabase/auth-ui-react';
-import { ThemeSupa } from '@supabase/auth-ui-shared';
+import { useState } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
+
+type Step = 'email' | 'code';
 
 export default function LoginPage() {
-  // 客户端组件（'use client'），不在服务端渲染。直接创建客户端。
-  const [supabase, setSupabase] = useState<SupabaseClient | null>(null);
-  useEffect(() => {
-    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-    if (url && anonKey) setSupabase(createClient(url, anonKey));
-  }, []);
+  const [step, setStep] = useState<Step>('email');
+  const [email, setEmail] = useState('');
+  const [code, setCode] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!supabase) return;
-    const { data: authListener } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
-        if (event === 'SIGNED_IN' && session?.access_token) {
-          await fetch('/api/auth/session', {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ accessToken: session.access_token }),
-          });
-          window.location.href = '/';
-        }
-      },
-    );
-    return () => authListener.subscription.unsubscribe();
-  }, [supabase]);
+  const requestOtp = async () => {
+    setLoading(true);
+    setError(null);
+    const res = await fetch('/api/auth/otp/request', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email }),
+    });
+    const data = await res.json().catch(() => ({}));
+    setLoading(false);
+    if (!res.ok) {
+      setError(data.error ?? '请求失败');
+      return;
+    }
+    setStep('code');
+  };
 
-  if (!supabase) {
-    return (
-      <div className="min-h-screen grid place-items-center bg-background p-5">
-        <Card>
-          <CardContent className="pt-6">加载中…</CardContent>
-        </Card>
-      </div>
-    );
-  }
+  const verifyOtp = async () => {
+    setLoading(true);
+    setError(null);
+    const res = await fetch('/api/auth/otp/verify', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email, code }),
+    });
+    const data = await res.json().catch(() => ({}));
+    setLoading(false);
+    if (!res.ok) {
+      setError(data.error ?? '验证失败');
+      return;
+    }
+    // 登录成功，硬刷到工作区让 server 重新读 cookie
+    window.location.href = '/';
+  };
 
   return (
     <div className="min-h-screen grid place-items-center bg-background p-5">
@@ -57,22 +66,79 @@ export default function LoginPage() {
           <h1 className="text-2xl font-semibold tracking-tight text-center">
             Forge<span className="text-primary">.</span>
           </h1>
-          <p className="text-sm text-muted-foreground text-center">
-            输入邮箱，点登录，邮件里的链接就是你的登录方式。
-            <br />
-            没有密码，不会泄露。
-          </p>
-          <Auth
-            supabaseClient={supabase}
-            appearance={{ theme: ThemeSupa }}
-            view="magic_link"
-            showLinks={false}
-            providers={[]}
-            redirectTo="/"
-          />
+
+          {step === 'email' ? (
+            <>
+              <p className="text-sm text-muted-foreground text-center">
+                输入邮箱，登录保存你的项目，或匿名直接使用。
+              </p>
+              <Input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="you@example.com"
+                aria-label="邮箱"
+                autoComplete="email"
+                autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && email.includes('@') && !loading) void requestOtp();
+                }}
+              />
+              {error ? <p className="text-sm text-destructive">{error}</p> : null}
+              <Button
+                onClick={() => void requestOtp()}
+                disabled={!email.includes('@') || loading}
+                className="w-full"
+              >
+                {loading ? '发送中…' : '发送验证码'}
+              </Button>
+            </>
+          ) : (
+            <>
+              <p className="text-sm text-muted-foreground text-center">
+                已发送到 <strong>{email}</strong>
+                <br />
+                查收邮件里的 6 位数字码。
+              </p>
+              <Input
+                type="text"
+                inputMode="numeric"
+                maxLength={6}
+                value={code}
+                onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
+                placeholder="123456"
+                aria-label="6 位验证码"
+                autoFocus
+                className="text-center text-2xl tracking-widest"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && code.length === 6 && !loading) void verifyOtp();
+                }}
+              />
+              {error ? <p className="text-sm text-destructive">{error}</p> : null}
+              <Button
+                onClick={() => void verifyOtp()}
+                disabled={code.length !== 6 || loading}
+                className="w-full"
+              >
+                {loading ? '验证中…' : '登录'}
+              </Button>
+              <button
+                type="button"
+                onClick={() => {
+                  setStep('email');
+                  setCode('');
+                  setError(null);
+                }}
+                className="block w-full text-xs text-muted-foreground hover:text-foreground underline"
+              >
+                换个邮箱
+              </button>
+            </>
+          )}
+
           <a
             href="/"
-            className="block text-center text-xs text-muted-foreground hover:text-foreground underline"
+            className="block text-center text-xs text-muted-foreground hover:text-foreground underline pt-2"
           >
             跳过，继续匿名使用
           </a>
