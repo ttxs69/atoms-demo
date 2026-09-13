@@ -16,7 +16,8 @@ test.beforeEach(async ({ page }) => {
   // by the removed dev overlay
   const errors: string[] = [];
   page.on('console', (msg) => {
-    if (msg.type() === 'error') errors.push(msg.text());
+    const text = `[${msg.type()}] ${msg.text()}`;
+    errors.push(text);
   });
   page.on('pageerror', (err) => errors.push(String(err)));
   // Expose for later assertions
@@ -94,6 +95,7 @@ test.describe('J1 — 陌生首访 → 生成 → 预览', () => {
 
 test.describe('J6 — 身份闭环（升级→清→登录→找回）', () => {
   test('upgrade with email+password, clear storage, login, workspace restored', async ({ page }) => {
+    test.slow(); // real generation + login + restore > default 120s
     await freshVisit(page);
 
     // Generate something first (need an app to restore)
@@ -148,6 +150,14 @@ test.describe('J6 — 身份闭环（升级→清→登录→找回）', () => {
     await loginBox.locator('input[type=email]').fill(email);
     await loginBox.locator('input[type=password]').fill(password);
     await loginBox.getByRole('button', { name: /^登录$/ }).click();
+
+    // Diagnose: is the cookie valid after login? Test /api/preview directly.
+    const previewResult = await page.evaluate(async () => {
+      const res = await fetch('/api/preview');
+      return { status: res.status, body: (await res.text()).slice(0, 200) };
+    });
+    // Assert directly — the error message shows the actual status
+    expect(previewResult.status, `preview after login: ${previewResult.body}`).toBe(200);
 
     // Workspace restored: topbar shows 运行中, preview iframe back
     await expect(page.locator('.topbar')).toContainText('运行中', { timeout: 30_000 });

@@ -463,7 +463,9 @@ export function Workspace() {
       });
       // 登录后走同一个找回预览的路径
       try {
+        console.log('[login] fetching /api/preview...');
         const res = await fetch('/api/preview');
+        console.log('[login] /api/preview status:', res.status);
         if (res.ok) {
           const d = (await res.json()) as { url?: string; files?: string[] };
           if (d.url) {
