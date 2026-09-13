@@ -102,13 +102,6 @@ export function Workspace() {
   const [identity, setIdentity] = useState<string | null>(null);
   // 升级是匿名身份唯一的保存路径——首次预览出现时主动邀请，而不是
   // 把它埋在顶栏小按钮里等人发现。
-  const [manualUpgrade, setManualUpgrade] = useState(false);
-  const [saveInviteDismissed, setSaveInviteDismissed] = useState(
-    () => typeof window !== 'undefined' && !!localStorage.getItem('forge-save-dismissed'),
-  );
-  const [saveEmail, setSaveEmail] = useState('');
-  const [savePassword, setSavePassword] = useState('');
-  const [saving, setSaving] = useState(false);
   const [upgraded, setUpgraded] = useState(false);
   // 已有账户的再登录（升级时设过密码的用户，换设备/清缓存后用）
   const [showLogin, setShowLogin] = useState(false);
@@ -517,28 +510,6 @@ export function Workspace() {
     }
   }, []);
 
-  const submitSave = useCallback(async () => {
-    if (!saveEmail.includes('@') || savePassword.length < 6) return;
-    setSaving(true);
-    try {
-      const res = await fetch('/api/auth/upgrade', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ email: saveEmail, password: savePassword }),
-      });
-      if (res.ok) {
-        setUpgraded(true);
-        setSaveInviteDismissed(true);
-        setManualUpgrade(false);
-        localStorage.setItem('forge-save-dismissed', '1');
-      } else {
-        const data = (await res.json().catch(() => null)) as { error?: string } | null;
-        window.alert(data?.error ?? '升级失败，请稍后再试。');
-      }
-    } finally {
-      setSaving(false);
-    }
-  }, [saveEmail]);
 
   const submit = useCallback(async () => {
     const message = input.trim();
@@ -614,9 +585,7 @@ export function Workspace() {
           upgraded ? (
             <span className="pill ok">已绑定邮箱</span>
           ) : (
-            <button type="button" className="btn small" onClick={() => { setManualUpgrade(true); setSaveInviteDismissed(false); }} title={identity}>
-              升级保存
-            </button>
+            <a href="/login" className="btn small" title={identity}>升级保存</a>
           )
         ) : (
           <span className="pill">连接中…</span>
@@ -786,52 +755,7 @@ export function Workspace() {
             )}
 
 
-            {(previewUrl || manualUpgrade) && !upgraded && !saveInviteDismissed ? (
-              <div className="save-invite">
-                <div className="save-title">🎉 应用跑起来了 —— 想保住它吗？</div>
-                <p className="save-note">
-                  匿名身份清了缓存就没了。留个邮箱和密码，升级成永久账户，换设备也能找回这个应用。
-                </p>
-                <div className="save-row">
-                  <input
-                    type="email"
-                    value={saveEmail}
-                    onChange={(e) => setSaveEmail(e.target.value)}
-                    placeholder="you@example.com"
-                    aria-label="邮箱"
-                  />
-                  <input
-                    type="password"
-                    value={savePassword}
-                    onChange={(e) => setSavePassword(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') void submitSave();
-                    }}
-                    placeholder="密码（至少 6 位，下次登录用）"
-                    aria-label="密码"
-                  />
-                  <button
-                    type="button"
-                    className="btn primary"
-                    disabled={saving || !saveEmail.includes('@') || savePassword.length < 6}
-                    onClick={() => void submitSave()}
-                  >
-                    {saving ? '保存中…' : '保住它'}
-                  </button>
-                  <button
-                    type="button"
-                    className="btn"
-                    onClick={() => {
-                      setSaveInviteDismissed(true);
-                      setManualUpgrade(false);
-                      localStorage.setItem('forge-save-dismissed', '1');
-                    }}
-                  >
-                    以后再说
-                  </button>
-                </div>
-              </div>
-              ) : null}
+            
 
             {planFiles.length > 0 ? (
               <div className="files-card">
