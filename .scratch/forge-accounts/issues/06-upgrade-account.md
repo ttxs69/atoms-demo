@@ -4,7 +4,7 @@
 
 **Blocked by:** 04 — 匿名会话换血与 IP 转发
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] 升级端点：updateUser({ email })，JWT 的 is_anonymous 翻转
 - [ ] UI 入口（额度横幅附近的"升级保存"）+ 邮箱输入

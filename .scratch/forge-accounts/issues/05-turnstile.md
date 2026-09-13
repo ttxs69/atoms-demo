@@ -4,7 +4,7 @@
 
 **Blocked by:** 04 — 匿名会话换血与 IP 转发
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] CaptchaPort { verify(token) }；生产实现调 siteverify
 - [ ] 前端 invisible widget 产出 token 随两个入口提交

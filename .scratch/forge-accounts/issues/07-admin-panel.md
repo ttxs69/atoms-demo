@@ -4,7 +4,7 @@
 
 **Blocked by:** 01 — 额度账本与原子预扣；04 — 匿名会话换血与 IP 转发
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] ADMIN_TOKEN 请求头即通过（无用户系统）
 - [ ] 活跃会话数（近 N 分钟有事件的身份）

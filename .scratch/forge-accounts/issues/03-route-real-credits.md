@@ -4,7 +4,7 @@
 
 **Blocked by:** 01 — 额度账本与原子预扣
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] 路由按 DATABASE_URL（有）或 pglite（无）构造端口
 - [ ] 预留失败：无模型调用、无沙箱、无文件写入（blocked_credits 路径，core-loop 已建）

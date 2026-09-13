@@ -4,7 +4,7 @@
 
 **Blocked by:** None — can start immediately.
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] ModelChunk ∪ {type:'usage'; input; output}；适配器从 fullStream 的 finish 部分提取
 - [ ] orchestrator 按轮累计 usage；agent_done.creditsUsed 与 settle 调用都用真值

@@ -4,7 +4,7 @@
 
 **Blocked by:** None — can start immediately.
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] quota(user_id, day, reserved, spent) 与 credit_ledger(幂等键唯一) 建表
 - [ ] reserve：当日行 FOR UPDATE + 上限校验；超限拒绝并返回 resetsAt（次日零点）

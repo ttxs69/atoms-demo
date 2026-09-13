@@ -4,7 +4,7 @@
 
 **Blocked by:** None — can start immediately.
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] 客户端静默 signInAnonymously + 会话 cookie（httpOnly）由服务端建立
 - [ ] 生成路由：无/过期会话 → 401（orchestrator 不被触达，fake 计数验证）
