@@ -333,7 +333,14 @@ export function Workspace() {
         const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
         if (!url || !anonKey) {
           // Dev without a platform project: X-Dev-Session keeps local flows alive.
-          const devId = `dev-${Math.random().toString(36).slice(2, 8)}`;
+          // Persist the dev id — a fresh random per load would orphan the
+          // workspace on every refresh in exactly the way we just fixed
+          // server-side.
+          let devId = localStorage.getItem('forge-dev-session');
+          if (!devId) {
+            devId = `dev-${Math.random().toString(36).slice(2, 8)}`;
+            localStorage.setItem('forge-dev-session', devId);
+          }
           sessionIdRef.current = devId;
           setIdentity(devId);
           return;
@@ -353,7 +360,36 @@ export function Workspace() {
             body: JSON.stringify({ accessToken: data.session.access_token }),
           });
           sessionIdRef.current = data.user?.id ?? '';
-          setIdentity(data.user?.id ?? null);
+          const id = data.user?.id ?? null;
+          setIdentity(id);
+
+          // Returning visitor: if this workspace already has an app, bring
+          // the preview and file tree back instead of a blank page.
+          try {
+            const res = await fetch('/api/preview');
+            if (res.ok) {
+              const data2 = (await res.json()) as { url?: string; files?: string[] };
+              if (data2.url) {
+                setPreviewUrl(data2.url);
+                setPreviewNonce((n) => n + 1);
+                setPreviewOpen(true);
+                if (data2.files && data2.files.length > 0) {
+                  setPlanFiles(
+                    data2.files
+                      .filter((f) => f.startsWith('src/'))
+                      .map((path, i) => ({
+                        toolCallId: `restored-${i}`,
+                        path,
+                        bytes: null,
+                        state: 'done' as const,
+                      })),
+                  );
+                }
+              }
+            }
+          } catch {
+            /* first visit or nothing generated — fine */
+          }
         }
       } catch {
         setIdentity(null);
