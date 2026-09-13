@@ -139,7 +139,22 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
 
   async function sandboxFor(sessionId: string): Promise<string> {
     const existing = sandboxBySession.get(sessionId);
-    if (existing !== undefined) return existing;
+    if (existing !== undefined) {
+      // GC may have killed this sandbox (14-day idle / project deleted).
+      // A dead id must self-heal: recreate the sandbox AND reset the
+      // session's turn semantics — the next run is a FIRST turn again
+      // (nothing exists), not an iterate against a dead manifest.
+      try {
+        await deps.sandbox.readFile(existing, 'package.json');
+        return existing;
+      } catch {
+        sandboxBySession.delete(sessionId);
+        plannedSessions.delete(sessionId);
+        sessionPaths.delete(sessionId);
+        interruptedSessions.delete(sessionId);
+        gateFailedSessions.delete(sessionId);
+      }
+    }
 
     // Session and workspace are 1:1 in the MVP, so the session id doubles as
     // the workspace id the sandbox is tagged with.

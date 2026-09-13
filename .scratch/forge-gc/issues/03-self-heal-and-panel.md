@@ -4,7 +4,7 @@
 
 **Blocked by:** 01 — deletion_queue、超龄推导与 sweep 引擎
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] 死沙箱自愈：resume/write 失败视为沙箱不存在 → 新建 → 会话映射更新（seam A fake 沙箱可驱动）
 - [ ] 自愈后的首轮是"首轮语义"（重新规划）而非 iterate

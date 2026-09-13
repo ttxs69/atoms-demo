@@ -4,7 +4,7 @@
 
 **Blocked by:** None — can start immediately.
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] deletion_queue 表迁移；幂等入队（重复 sweep 不重不漏）
 - [ ] 超龄推导纯函数：30 天无账本行→身份过期；29 天→不过期；沙箱 14 天同理

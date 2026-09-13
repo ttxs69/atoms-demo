@@ -4,7 +4,7 @@
 
 **Blocked by:** 01 — deletion_queue、超龄推导与 sweep 引擎
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] 四个生产删除器；E2B 定位用 Sandbox.list({metadata:{workspace_id}})
 - [ ] 缺 key → 该删除器 no-op 且队列行注明（降级诚实）

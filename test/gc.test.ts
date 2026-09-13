@@ -154,3 +154,56 @@ test('DELETE /api/workspace enqueues all four targets for the session user', asy
   const left = await db.query(`SELECT 1 FROM credit_ledger WHERE user_id = 'dev-ws'`);
   assert.equal(left.rows.length, 0);
 });
+
+// ─── ticket 03: dead-sandbox self-heal (GC ↔ generation loop 交汇点) ─────
+
+import { createOrchestrator } from '../src/orchestrator/orchestrator.ts';
+import { FakeSandbox } from './fakes/fake-sandbox.ts';
+import { FakeModel, type ScriptedTurn } from './fakes/fake-model.ts';
+import { planTurn } from './fakes/plan-turn.ts';
+
+test('a GC-killed sandbox self-heals: next run is a fresh FIRST turn', async () => {
+  const sandbox = new FakeSandbox();
+  const writes: ScriptedTurn[] = [
+    [
+      { type: 'tool_call_start', toolCallId: 'a', toolName: 'write_file' },
+      { type: 'tool_input_delta', toolCallId: 'a', argsDelta: '{"path":"src/App.tsx","content":"v1"}' },
+      { type: 'tool_call_end', toolCallId: 'a' },
+    ],
+    [{ type: 'text', delta: 'done' }],
+    [
+      { type: 'tool_call_start', toolCallId: 'b', toolName: 'write_file' },
+      { type: 'tool_input_delta', toolCallId: 'b', argsDelta: '{"path":"src/App.tsx","content":"v2"}' },
+      { type: 'tool_call_end', toolCallId: 'b' },
+    ],
+    [{ type: 'text', delta: 'done' }],
+  ];
+  const model2 = new FakeModel({
+    pm: [...planTurn(['src/App.tsx']), ...planTurn(['src/App.tsx'])],
+    eng: writes,
+  });
+  const orchestrator = createOrchestrator({
+    sandbox,
+    model: model2,
+    credits: { reserve: async () => ({ ok: true }), settle: async () => {} },
+  });
+
+  // turn 1: 完整首轮
+  const t1 = [];
+  for await (const e of orchestrator.run('ws-heal', '做个应用')) t1.push(e);
+  const sandboxId1 = [...sandbox.files.keys()][0]!;
+  assert.ok(t1.some((e) => e.type === 'plan_ready'));
+
+  // GC 杀掉沙箱
+  await sandbox.kill(sandboxId1);
+
+  // turn 2: 自愈——重新 pm 规划（新一轮 plan_ready），新沙箱
+  const t2 = [];
+  for await (const e of orchestrator.run('ws-heal', '再来')) t2.push(e);
+  assert.ok(t2.some((e) => e.type === 'plan_ready'), 'dead sandbox → first-turn semantics');
+  assert.equal(sandbox.files.size, 1, 'a NEW sandbox exists');
+  const sandboxId2 = [...sandbox.files.keys()][0]!;
+  assert.notEqual(sandboxId2, sandboxId1);
+  const content = await sandbox.readFile(sandboxId2, 'src/App.tsx');
+  assert.equal(content, 'v2');
+});
