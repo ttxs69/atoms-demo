@@ -10,6 +10,7 @@ import type {
 } from '../ports/model-port.ts';
 import type { SandboxPort } from '../ports/sandbox-port.ts';
 import { SCAFFOLD_FILES } from './scaffold.ts';
+import { injectRlsTemplate } from '../backend/rls-template.ts';
 
 /**
  * The security gate (RLS template + Security Advisor scan in production).
@@ -20,9 +21,17 @@ import { SCAFFOLD_FILES } from './scaffold.ts';
  * bounded self-repair loop (a technical build failure is fixable; an
  * unsafe data-isolation policy is not something to retry past).
  */
+/** Context the gate inspects: which sandbox, whose workspace, what SQL. */
+export interface GateContext {
+  sandboxId: string;
+  workspaceId: string;
+  /** Present when the project carries supabase/migrations — already INJECTED. */
+  migrationSql?: string;
+}
+
 export interface GatePort {
   check(
-    sandboxId: string,
+    ctx: GateContext,
   ): Promise<{ ok: true } | { ok: false; code: string; detail: string }>;
 }
 
@@ -262,14 +271,34 @@ function parsePlanArgs(raw: string): Plan {
         await runCommandOrFail(sandboxId, 'npm install --no-audit --no-fund', 'npm install');
       }
 
-      // Security gate: between install and build (state machine:
-      // installing → migrating → gating → building). Absent gate = pass
-      // through (forge-app-backend injects the real one). A FAILED gate is
-      // terminal: rollback semantics belong to the gate itself; here we
-      // stop, surface the finding, and remember it for the rewrite turn.
+      // Migrating + security gate (state machine: installing → migrating →
+      // gating → building). Migration SQL is INJECTED with the platform
+      // template before the gate ever sees it — the model cannot opt out.
+      // Absent gate = pass through. A FAILED gate is terminal: rollback
+      // semantics belong to the gate itself; here we stop, surface the
+      // finding, and remember it for the rewrite turn.
+      let migrationSql: string | undefined;
+      try {
+        const migrationFiles = (await deps.sandbox.listFiles(sandboxId, 'supabase/migrations'))
+          .filter((p) => p.endsWith('.sql'))
+          .sort();
+        if (migrationFiles.length > 0) {
+          yield { type: 'run_step', step: 'migrating' };
+          const raw = await Promise.all(
+            migrationFiles.map((p) => deps.sandbox.readFile(sandboxId, p)),
+          );
+          migrationSql = injectRlsTemplate(raw.join('\n\n'), sessionId).sql;
+        }
+      } catch {
+        // no migrations directory — nothing to gate on
+      }
       if (deps.gate) {
         yield { type: 'gate_started', gate: 'security' };
-        const verdict = await deps.gate.check(sandboxId);
+        const verdict = await deps.gate.check({
+          sandboxId,
+          workspaceId: sessionId,
+          ...(migrationSql !== undefined ? { migrationSql } : {}),
+        });
         if (!verdict.ok) {
           gateFailedSessions.set(sessionId, { code: verdict.code, detail: verdict.detail });
           yield { type: 'gate_failed', code: verdict.code, detail: verdict.detail };

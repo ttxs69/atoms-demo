@@ -59,7 +59,7 @@ export type TransientEvent =
   | { type: 'blocked_credits'; resetsAt?: string }
   | {
       type: 'run_step';
-      step: 'installing' | 'building' | 'starting' | 'preview_ready' | 'autofixing';
+      step: 'installing' | 'migrating' | 'building' | 'starting' | 'preview_ready' | 'autofixing';
       /** Present on preview_ready: the URL the preview iframe should load. */
       url?: string;
       /** Present on autofixing: which repair round this is. */

@@ -534,6 +534,7 @@ export function Workspace() {
                         <span className="status">{step.step === 'preview_ready' ? '✓' : '▶'}</span>
                         <span>
                           {step.step === 'installing' && '安装依赖 npm install'}
+                          {step.step === 'migrating' && '数据库迁移与安全检查'}
                           {step.step === 'building' && '构建 npm run build'}
                           {step.step === 'starting' && '启动开发服务器'}
                           {step.step === 'preview_ready' && '预览就绪'}

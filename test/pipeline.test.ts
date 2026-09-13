@@ -638,7 +638,7 @@ test('a passing gate continues to build', async () => {
       eng: [writeTurn({ 'src/App.tsx': 'x' }), done],
     }),
     credits: new FakeCredits(),
-    gate: { check: async () => ({ ok: true }) as const },
+    gate: { check: async (_ctx) => ({ ok: true }) as const },
   });
 
   const events = await collect(orchestrator.run('s-gateok', 'go'));
@@ -664,7 +664,7 @@ test('the turn after a gate failure carries the rewrite context', async () => {
     model,
     credits: new FakeCredits(),
     gate: {
-      check: async () =>
+      check: async (_ctx) =>
         firstCall
           ? ((firstCall = false), { ok: false as const, code: 'LINT_0024', detail: 'notes USING(true)' })
           : { ok: true as const },
@@ -709,3 +709,54 @@ test('usage chunks flow into settle and agent_done', async () => {
   assert.equal((done as { creditsUsed: number }).creditsUsed, 530);
 });
 const PLAN_DONE = [{ type: 'tool_call_start' as const, toolCallId: 'p1', toolName: 'plan_files' }, { type: 'tool_input_delta' as const, toolCallId: 'p1', argsDelta: '{"files":["src/App.tsx"],"description":"d"}' }, { type: 'tool_call_end' as const, toolCallId: 'p1' }];
+
+// ─── forge-app-backend 02: migrations → migrating → gating ────────────────
+
+test('a migration file routes through migrating; the gate receives INJECTED SQL', async () => {
+  const sandbox = new FakeSandbox();
+  const seen: { sql?: string; workspaceId?: string }[] = [];
+  const model = new FakeModel({
+    pm: planTurn(['src/App.tsx', 'supabase/migrations/001.sql']),
+    eng: [
+      writeTurn({
+        'src/App.tsx': 'x',
+        'supabase/migrations/001.sql': 'CREATE TABLE notes (id int, body text);',
+      }),
+      done,
+    ],
+  });
+  const orchestrator = createOrchestrator({
+    sandbox,
+    model,
+    credits: new FakeCredits(),
+    gate: {
+      check: async (ctx) => {
+        seen.push({
+          sql: ctx.migrationSql,
+          ...(ctx.workspaceId !== undefined ? { workspaceId: ctx.workspaceId } : {}),
+        });
+        return { ok: true } as const;
+      },
+    },
+  });
+
+  const events = await collect(orchestrator.run('ws-mig', 'make a notes app'));
+
+  const seq = events
+    .filter((e) => e.type === 'run_step')
+    .map((e) => (e as { step: string }).step);
+  assert.ok(seq.includes('migrating'), 'migrating step fires');
+  assert.ok(seq.indexOf('migrating') < seq.indexOf('building'), 'gating precedes build');
+  assert.ok(seen[0]?.sql?.includes('platform template'), 'gate saw injected SQL');
+  assert.ok(seen[0]?.sql?.includes('CREATE TABLE notes'), 'model SQL preserved inside');
+  assert.equal(seen[0]?.workspaceId, 'ws-mig');
+  assert.ok(events.some((e) => e.type === 'run_step' && e.step === 'preview_ready'));
+});
+
+test('no migrations → no migrating step (pipeline unchanged)', async () => {
+  const orchestrator = makeOrchestrator(new FakeSandbox(), {
+    eng: [writeTurn({ 'src/App.tsx': 'x' }), done],
+  });
+  const events = await collect(orchestrator.run('s-nomig', 'go'));
+  assert.ok(!events.some((e) => e.type === 'run_step' && (e as { step: string }).step === 'migrating'));
+});
