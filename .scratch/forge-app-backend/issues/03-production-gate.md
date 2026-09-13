@@ -4,7 +4,7 @@
 
 **Blocked by:** 01 — RLS 模板注入器与无 RLS 检测器
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] 生产实现可注入路由；无 APPS_SUPABASE_* key 时缺位降级（不崩，门控跳过并注明）
 - [ ] advisor 结果分级：error 拦（code=规则号，detail=表与策略名填已有卡片）、warn 只记录

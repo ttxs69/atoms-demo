@@ -4,7 +4,7 @@
 
 **Blocked by:** 01 — RLS 模板注入器与无 RLS 检测器
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] 有迁移文件 → 事件流出现 migrating 步骤；无迁移 → 管线不变
 - [ ] 迁移内容经注入器变换后交给 GatePort（假门控断言收到的是注入后 SQL）

@@ -4,7 +4,7 @@
 
 **Blocked by:** 02 — 管线接线；03 — 生产 GatePort 与构建期 env 注入
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] Emma 规划区分持久化/本地两条路；持久化时计划含 supabase/migrations
 - [ ] Alex 指令：持久化应用用 import.meta.env 连接，绝不硬编码、不写 secret

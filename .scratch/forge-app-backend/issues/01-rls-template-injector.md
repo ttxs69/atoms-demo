@@ -4,7 +4,7 @@
 
 **Blocked by:** None — can start immediately.
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] 处理 CREATE TABLE 全形态（IF NOT EXISTS、schema 限定名、多语句文件）；解析不了的形态直接报错，不静默漏注
 - [ ] 模型 SQL 里自带的 GRANT 语句被模板的 REVOKE 覆盖（追加在后）
