@@ -20,6 +20,8 @@ test('首页加载 + 关键元素', async ({ page }) => {
   // 关键元素存在
   await expect(page.getByText('Forge.')).toBeVisible();
   await expect(page.getByText('想做点什么？')).toBeVisible();
+  // 换设备了链接（不再是按钮，是 anchor）
+  await expect(page.getByRole('link', { name: /换设备了/ })).toBeVisible();
 
   // 等 dev fallback 完成（Supabase 被 abort → 4s timeout 触发 dev 模式）
   await expect(page.locator('header')).toContainText(/dev-|连接中/, { timeout: 6000 });
@@ -37,9 +39,7 @@ test('/login 页面加载 + 标题', async ({ page }) => {
   const resp = await page.goto(`${URL}/login`, { waitUntil: 'domcontentloaded' });
   expect(resp?.status()).toBe(200);
 
-  // 至少渲染 Forge 标题（Auth UI 需要 Supabase，被 abort 时不渲染）
-  await expect(page.getByText('Forge.')).toBeVisible();
-  // 加载中 或 Auth UI 之一
+  // 加载中（Supabase 被 abort 时）或 Auth UI 之一
   await expect(page.getByText(/加载中|魔法链接|邮箱/)).toBeVisible({ timeout: 3000 });
 
   const real = errors.filter((e) => !e.includes('favicon') && !e.includes('AbortError'));

@@ -4,7 +4,6 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible';
@@ -108,11 +107,6 @@ export function Workspace() {
   const [gateFinding, setGateFinding] = useState<{ code: string; detail: string } | null>(null);
   const [identity, setIdentity] = useState<string | null>(null);
   const [upgraded, setUpgraded] = useState(false);
-  const [showLogin, setShowLogin] = useState(false);
-  const [loginEmail, setLoginEmail] = useState('');
-  const [loginPassword, setLoginPassword] = useState('');
-  const [loggingIn, setLoggingIn] = useState(false);
-  const [loginError, setLoginError] = useState<string | null>(null);
   const [pane, setPane] = useState<'preview' | 'code'>('preview');
   const [previewOpen, setPreviewOpen] = useState(false);
   const [codeFiles, setCodeFiles] = useState<string[]>([]);
@@ -418,87 +412,6 @@ export function Workspace() {
     })();
   }, []);
 
-  const loginExisting = useCallback(async () => {
-    setLoggingIn(true);
-    setLoginError(null);
-    try {
-      const { createClient } = await import('@supabase/supabase-js');
-      const supabase = createClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      );
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email: loginEmail,
-        password: loginPassword,
-      });
-      if (error || !data.session) {
-        setLoginError(error?.message ?? '登录失败，请检查邮箱和密码。');
-        return;
-      }
-      setShowLogin(false);
-      sessionIdRef.current = data.user.id;
-      setIdentity(data.user.id);
-      const { turnstileToken } = await import('../auth/turnstile-client.ts');
-      const tsToken = await turnstileToken();
-      await fetch('/api/auth/session', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          accessToken: data.session.access_token,
-          ...(tsToken ? { turnstileToken: tsToken } : {}),
-        }),
-      });
-      try {
-        const res = await fetch('/api/preview');
-        if (res.ok) {
-          const d = (await res.json()) as { url?: string; files?: string[] };
-          if (d.url) {
-            setPreviewUrl(d.url);
-            setPreviewNonce((n) => n + 1);
-            setPreviewOpen(true);
-            if (d.files?.length) {
-              setPlanFiles(
-                d.files
-                  .filter((f) => f.startsWith('src/'))
-                  .map((path, i) => ({
-                    toolCallId: `login-${i}`,
-                    path,
-                    bytes: null,
-                    state: 'done' as const,
-                  })),
-              );
-            }
-          }
-        }
-      } catch { /* nothing to restore — fine */ }
-    } finally {
-      setLoggingIn(false);
-    }
-  }, [loginEmail, loginPassword]);
-
-  const startAnonymous = useCallback(async () => {
-    setShowLogin(false);
-    const { createClient } = await import('@supabase/supabase-js');
-    const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    );
-    const { data } = await supabase.auth.signInAnonymously();
-    if (data.session?.access_token && data.user) {
-      sessionIdRef.current = data.user.id;
-      setIdentity(data.user.id);
-      const { turnstileToken } = await import('../auth/turnstile-client.ts');
-      const tsToken = await turnstileToken();
-      await fetch('/api/auth/session', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          accessToken: data.session.access_token,
-          ...(tsToken ? { turnstileToken: tsToken } : {}),
-        }),
-      });
-    }
-  }, []);
 
   const submit = useCallback(async () => {
     const message = input.trim();
@@ -602,16 +515,6 @@ export function Workspace() {
           <div className="flex-1 overflow-y-auto px-4 py-6 space-y-4">
             {messages.length === 0 ? (
               <EmptyState
-                showLogin={showLogin}
-                loginEmail={loginEmail}
-                loginPassword={loginPassword}
-                loginError={loginError}
-                loggingIn={loggingIn}
-                setLoginEmail={setLoginEmail}
-                setLoginPassword={setLoginPassword}
-                onLogin={() => void loginExisting()}
-                onAnonymous={() => void startAnonymous()}
-                onShowLogin={() => setShowLogin(true)}
                 onExampleClick={(text) => {
                   setInput(text);
                   const ta = document.querySelector<HTMLTextAreaElement>('textarea[name=composer]');
@@ -837,87 +740,20 @@ export function Workspace() {
 /* ---- Sub-components ----------------------------------------------------- */
 
 function EmptyState({
-  showLogin,
-  loginEmail,
-  loginPassword,
-  loginError,
-  loggingIn,
-  setLoginEmail,
-  setLoginPassword,
-  onLogin,
-  onAnonymous,
-  onShowLogin,
   onExampleClick,
 }: {
-  showLogin: boolean;
-  loginEmail: string;
-  loginPassword: string;
-  loginError: string | null;
-  loggingIn: boolean;
-  setLoginEmail: (v: string) => void;
-  setLoginPassword: (v: string) => void;
-  onLogin: () => void;
-  onAnonymous: () => void;
-  onShowLogin: () => void;
   onExampleClick: (text: string) => void;
 }) {
-  if (showLogin) {
-    return (
-      <div className="max-w-md mx-auto space-y-4 pt-8">
-        <h1 className="text-2xl font-semibold">登录已有账户</h1>
-        <p className="text-sm text-muted-foreground">
-          登录已保存的账户，找回你的应用；或直接匿名开始一个新的。
-        </p>
-        <Card>
-          <CardContent className="pt-4 space-y-3">
-            <Input
-              type="email"
-              value={loginEmail}
-              onChange={(e) => setLoginEmail(e.target.value)}
-              placeholder="you@example.com"
-              aria-label="邮箱"
-            />
-            <Input
-              type="password"
-              value={loginPassword}
-              onChange={(e) => setLoginPassword(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') onLogin(); }}
-              placeholder="密码"
-              aria-label="密码"
-            />
-            {loginError ? (
-              <Alert variant="destructive">
-                <AlertDescription>{loginError}</AlertDescription>
-              </Alert>
-            ) : null}
-            <div className="flex gap-2">
-              <Button
-                variant="default"
-                disabled={loggingIn || !loginEmail.includes('@') || loginPassword.length < 6}
-                onClick={onLogin}
-              >
-                {loggingIn ? '登录中…' : '登录'}
-              </Button>
-              <Button variant="outline" onClick={onAnonymous}>
-                直接开始（匿名）
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
   return (
     <div className="max-w-2xl mx-auto space-y-6 pt-8 text-center">
       <h1 className="text-3xl font-semibold tracking-tight">想做点什么？</h1>
       <p>
-        <button
-          type="button"
+        <a
+          href="/login"
           className="text-sm text-muted-foreground hover:text-foreground underline underline-offset-2"
-          onClick={onShowLogin}
         >
           换设备了？登录已有账户
-        </button>
+        </a>
       </p>
       <p className="text-sm text-muted-foreground">
         描述你想要的网站或工具，Alex 会把它建出来。
