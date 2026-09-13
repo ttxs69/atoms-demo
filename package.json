@@ -15,6 +15,7 @@
     "test:live": "RUN_LIVE=1 node --test --test-name-pattern='live:' test/live.test.ts"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8",
     "@types/node": "^22.20.2",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
