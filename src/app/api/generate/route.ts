@@ -28,6 +28,7 @@ let orchestratorPromise: Promise<ReturnType<typeof createOrchestrator>> | null =
 async function buildGate() {
   const dbUrl = process.env['APPS_SUPABASE_DB_URL'];
   if (!dbUrl) return undefined; // degraded: no shared project, gate absent
+  try {
   const { Client } = await import('pg');
   const client = new Client({
     connectionString: dbUrl,
@@ -49,6 +50,12 @@ async function buildGate() {
   const wrapped = client as unknown as import('../../../credits/ledger.ts').SqlClient & { transaction: typeof tx };
   wrapped.transaction = tx;
   return new SharedProjectGate(wrapped);
+  } catch (e) {
+    // The gate must never take the app down — degrade to no gate
+    // (migrations pass through unchecked; the shared project isn't used).
+    console.error('[gate] shared project unreachable, gate disabled:', e instanceof Error ? e.message : e);
+    return undefined;
+  }
 }
 
 function buildOrchestrator() {
