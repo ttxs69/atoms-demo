@@ -1,5 +1,11 @@
 FROM node:22-slim AS builder
 WORKDIR /app
+# NEXT_PUBLIC_* must be present at BUILD time (Next.js inlines them into
+# the client JS bundle). ENV here guarantees they're available regardless
+# of .env file presence in the build context.
+ENV NEXT_PUBLIC_SUPABASE_URL=https://wxivajmhzvfmhjwzotiv.supabase.co
+ENV NEXT_PUBLIC_SUPABASE_ANON_KEY=sb_publishable_C7pHc82bluzIU07jjlPrbw_I5x7Xo0k
+ENV NEXT_PUBLIC_TURNSTILE_SITE_KEY=
 COPY package*.json ./
 RUN npm ci
 COPY . .
