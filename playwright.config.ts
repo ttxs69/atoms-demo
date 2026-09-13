@@ -19,6 +19,7 @@ export default defineConfig({
     reuseExistingServer: true,
     timeout: 60_000,
   },
+  workers: 4,
   projects: [
     { name: 'chromium', use: { browserName: 'chromium' } },
   ],

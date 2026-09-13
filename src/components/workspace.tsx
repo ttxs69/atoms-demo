@@ -1,6 +1,13 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Card, CardContent } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
+import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible';
 import { AGENT_NAMES, AGENT_ROLE_LABELS, type AgentHandle } from '../domain/roles.ts';
 import type { StreamEvent } from '../domain/events.ts';
 import { decodeEvents } from '../transport/sse.ts';
@@ -74,10 +81,10 @@ function highlight(source: string, path: string): string {
         ? 'true|false|null'
         : 'const|let|var|function|return|if|else|for|while|import|from|export|default|type|interface|extends|new|async|await|class|try|catch|switch|case|break|null|undefined|true|false';
   return esc
-    .replace(/(&quot;|"|')(?:\\.|(?!\1)[^\\\n])*\1/g, (m) => `<span class="tok-str">${m}</span>`)
-    .replace(/\/\/[^\n]*/g, (m) => `<span class="tok-com">${m}</span>`)
-    .replace(/\/\*[\s\S]*?\*\//g, (m) => `<span class="tok-com">${m}</span>`)
-    .replace(new RegExp(`\\b(${keywords})\\b`, 'g'), (m) => `<span class="tok-kw">${m}</span>`);
+    .replace(/(&quot;|"|')(?:\\.|(?!\1)[^\\\n])*\1/g, (m) => `<span class="text-emerald-600 dark:text-emerald-400">${m}</span>`)
+    .replace(/\/\/[^\n]*/g, (m) => `<span class="text-zinc-500 italic">${m}</span>`)
+    .replace(/\/\*[\s\S]*?\*\//g, (m) => `<span class="text-zinc-500 italic">${m}</span>`)
+    .replace(new RegExp(`\\b(${keywords})\\b`, 'g'), (m) => `<span class="text-sky-600 dark:text-sky-400 font-medium">${m}</span>`);
 }
 
 /** "4 个文件 · 已完成 1 · 正在写第 2 个" — real progress, not a fake bar. */
@@ -100,10 +107,7 @@ export function Workspace() {
   const [stopped, setStopped] = useState(false);
   const [gateFinding, setGateFinding] = useState<{ code: string; detail: string } | null>(null);
   const [identity, setIdentity] = useState<string | null>(null);
-  // 升级是匿名身份唯一的保存路径——首次预览出现时主动邀请，而不是
-  // 把它埋在顶栏小按钮里等人发现。
   const [upgraded, setUpgraded] = useState(false);
-  // 已有账户的再登录（升级时设过密码的用户，换设备/清缓存后用）
   const [showLogin, setShowLogin] = useState(false);
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
@@ -115,33 +119,20 @@ export function Workspace() {
   const [codeFile, setCodeFile] = useState<{ path: string; content: string } | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const [device, setDevice] = useState<'desktop' | 'tablet' | 'mobile'>('desktop');
-  // The workspace file tree — skeleton-first: filled by plan_ready, then each
-  // row moves planned → writing → done as Alex works. Keyed by path so plan
-  // rows and write events meet regardless of message boundaries.
   const [planFiles, setPlanFiles] = useState<FileEntry[]>([]);
 
-  // One session for the lifetime of the tab. Persisting it is ticket 07's job.
-  // Stable initial value — Date.now()/Math.random() in render causes
-  // hydration mismatches (SSR renders once, client again). The real id is
-  // assigned client-side in the identity effect below.
   const sessionIdRef = useRef<string>('');
-  // Raw tool arguments per call id, so a path can be recovered mid-stream.
   const toolArgsRef = useRef(new Map<string, string>());
 
   const applyEvent = useCallback((event: StreamEvent) => {
     setLog((prev) => [...prev, JSON.stringify(event)]);
 
-    // Side effects happen OUTSIDE the state updater. React StrictMode
-    // double-invokes updaters in development; mutating refs or setting other
-    // state inside one would run twice and corrupt the buffered tool args.
     if (event.type === 'tool_call_start') {
       toolArgsRef.current.set(event.toolCallId, '');
     } else if (event.type === 'tool_input_delta') {
       const buffered =
         (toolArgsRef.current.get(event.toolCallId) ?? '') + event.argsDelta;
       toolArgsRef.current.set(event.toolCallId, buffered);
-      // Skeleton-first: name the row the moment the path parses out of the
-      // streaming args, and mark it writing.
       const path = extractPath(buffered);
       if (path) {
         setPlanFiles((prev) => {
@@ -160,8 +151,6 @@ export function Workspace() {
         });
       }
     } else if (event.type === 'run_step' && event.step === 'preview_ready' && event.url) {
-      // Same URL every turn — the nonce remounts the iframe so the preview
-      // actually refreshes to the new build.
       setPreviewUrl(event.url);
       setPreviewNonce((n) => n + 1);
     } else if (event.type === 'interrupted') {
@@ -175,8 +164,6 @@ export function Workspace() {
         : '明天恢复';
       setFatal(`今日额度已用完，${when}。第二天再来，或换个更简单的需求减少消耗。`);
     } else if (event.type === 'plan_ready') {
-      // Dedupe by path: a duplicated path in the plan would otherwise
-      // inflate the denominator and render two rows that both flip.
       const seen = new Set<string>();
       setPlanFiles(
         event.files
@@ -202,10 +189,6 @@ export function Workspace() {
     }
 
     setMessages((prev) => {
-      // Never mutate objects from the previous render — React (especially
-      // StrictMode, which Next dev mode enables) double-invokes updater
-      // functions. Every branch must return a structurally-new message array
-      // with a new object for any message that changed.
       const lastAgentIndex = (() => {
         for (let i = prev.length - 1; i >= 0; i -= 1) {
           if (prev[i]?.kind === 'agent') return i;
@@ -301,8 +284,6 @@ export function Workspace() {
           return updateLast((message) => ({ ...message, finished: true }));
 
         default:
-          // Transient progress events are logged but have no home in the
-          // message list until later tickets render them.
           return prev;
       }
     });
@@ -332,8 +313,7 @@ export function Workspace() {
     }
   }, []);
 
-  // Silent anonymous sign-in on mount: zero forms, zero clicks. The server
-  // validates and sets the httpOnly cookie the generate route trusts.
+  // Silent anonymous sign-in on mount
   useEffect(() => {
     void (async () => {
       try {
@@ -341,10 +321,6 @@ export function Workspace() {
         const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
         const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
         if (!url || !anonKey) {
-          // Dev without a platform project: X-Dev-Session keeps local flows alive.
-          // Persist the dev id — a fresh random per load would orphan the
-          // workspace on every refresh in exactly the way we just fixed
-          // server-side.
           let devId = localStorage.getItem('forge-dev-session');
           if (!devId) {
             devId = `dev-${Math.random().toString(36).slice(2, 8)}`;
@@ -355,13 +331,8 @@ export function Workspace() {
           return;
         }
         const supabase = createClient(url, anonKey);
-        // Reuse the persisted session first — a blind signInAnonymously on
-        // every load mints a NEW anonymous user each time, orphaning the
-        // previous workspace. supabase-js persists sessions in localStorage.
         const existing = await supabase.auth.getSession();
         if (!existing.data.session) {
-          // 无会话 = 大多数情况是陌生新访客：静默匿名开始，零摩擦是根基。
-          // 换设备回来的老用户走空状态里的「登录已有账户」链接。
           const fresh = await supabase.auth.signInAnonymously();
           if (fresh.data.session?.access_token && fresh.data.user) {
             sessionIdRef.current = fresh.data.user.id;
@@ -381,7 +352,6 @@ export function Workspace() {
         }
         const session = existing.data.session;
         if (session?.access_token && session.user) {
-          const data = { session, user: session.user };
           await fetch('/api/auth/session', {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
@@ -391,14 +361,12 @@ export function Workspace() {
           const id = session.user.id;
           setIdentity(id);
 
-          // Returning visitor: if this workspace already has an app, bring
-          // the preview and file tree back instead of a blank page.
           try {
             const res = await fetch('/api/preview');
             if (res.ok) {
               const data2 = (await res.json()) as { url?: string; files?: string[] };
               if (data2.url) {
-                          setPreviewUrl(data2.url);
+                setPreviewUrl(data2.url);
                 setPreviewNonce((n) => n + 1);
                 setPreviewOpen(true);
                 if (data2.files && data2.files.length > 0) {
@@ -455,15 +423,12 @@ export function Workspace() {
           ...(tsToken ? { turnstileToken: tsToken } : {}),
         }),
       });
-      // 登录后走同一个找回预览的路径
       try {
-        console.log('[login] fetching /api/preview...');
         const res = await fetch('/api/preview');
-        console.log('[login] /api/preview status:', res.status);
         if (res.ok) {
           const d = (await res.json()) as { url?: string; files?: string[] };
           if (d.url) {
-                  setPreviewUrl(d.url);
+            setPreviewUrl(d.url);
             setPreviewNonce((n) => n + 1);
             setPreviewOpen(true);
             if (d.files?.length) {
@@ -510,16 +475,13 @@ export function Workspace() {
     }
   }, []);
 
-
   const submit = useCallback(async () => {
     const message = input.trim();
     if (message.length === 0 || streaming) return;
-    if (!sessionIdRef.current) return; // identity still connecting
+    if (!sessionIdRef.current) return;
 
     setInput('');
     setFatal(null);
-    // Each turn gets a fresh tree: turn-1 rows must not bleed into turn-2's
-    // progress (iterate turns build their rows from writes alone).
     setPlanFiles([]);
     setStreaming(true);
     setMessages((prev) => [
@@ -569,226 +531,172 @@ export function Workspace() {
   }, [applyEvent, input, streaming]);
 
   return (
-    <div className="frame">
-      <div className="topbar">
-        <div className="logo">
-          Forge<span>.</span>
-        </div>
-        <div className="spacer" />
-        {gateFinding ? <span className="pill err">需要确认</span> : null}
-        {stopped && !gateFinding ? <span className="pill">已停止</span> : null}
-        {streaming ? <span className="pill run">生成中</span> : null}
-        {!streaming && !gateFinding && previewUrl ? (
-          <span className="pill ok">运行中</span>
-        ) : null}
-        {identity ? (
-          upgraded ? (
-            <span className="pill ok">已绑定邮箱</span>
+    <div className="min-h-screen flex flex-col bg-background text-foreground">
+      {/* Topbar */}
+      <header className="border-b bg-background/95 backdrop-blur sticky top-0 z-10">
+        <div className="flex items-center gap-2 px-4 h-12">
+          <div className="text-base font-semibold tracking-tight">
+            Forge<span className="text-primary">.</span>
+          </div>
+          <div className="flex-1" />
+          {gateFinding ? <Badge variant="destructive">需要确认</Badge> : null}
+          {stopped && !gateFinding ? <Badge variant="secondary">已停止</Badge> : null}
+          {streaming ? <Badge variant="default" className="bg-blue-500">生成中</Badge> : null}
+          {!streaming && !gateFinding && previewUrl ? (
+            <Badge variant="default" className="bg-emerald-500">运行中</Badge>
+          ) : null}
+          {identity ? (
+            upgraded ? (
+              <Badge variant="default" className="bg-emerald-500">已绑定邮箱</Badge>
+            ) : (
+              <a
+                href="/login"
+                title={identity}
+                className="inline-flex items-center justify-center rounded-md text-sm font-medium border border-input bg-background hover:bg-accent h-7 px-2.5 transition-colors"
+              >
+                升级保存
+              </a>
+            )
           ) : (
-            <a href="/login" className="btn small" title={identity}>升级保存</a>
-          )
-        ) : (
-          <span className="pill">连接中…</span>
-        )}
-        <button
-          type="button"
-          className="btn small"
-          onClick={() => setPreviewOpen((v) => !v)}
-        >
-          {previewOpen ? '收起预览' : '预览'}
-        </button>
-      </div>
+            <Badge variant="secondary">连接中…</Badge>
+          )}
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setPreviewOpen((v) => !v)}
+          >
+            {previewOpen ? '收起预览' : '预览'}
+          </Button>
+        </div>
+      </header>
 
-      <div className={previewOpen ? 'body' : 'body preview-collapsed'}>
-        <section className="chat" aria-label="对话">
-          <div className="chat-scroll">
+      {/* Body: chat + preview */}
+      <div className={`flex-1 grid grid-cols-1 lg:grid-cols-[1fr_minmax(420px,1fr)] min-h-0 ${previewOpen ? '' : 'lg:grid-cols-1'}`}>
+        {/* Chat pane */}
+        <section className="flex flex-col min-h-0 border-r" aria-label="对话">
+          <div className="flex-1 overflow-y-auto px-4 py-6 space-y-4">
             {messages.length === 0 ? (
-              <>
-              {showLogin ? (
-                <div className="empty">
-                  <h1>登录已有账户</h1>
-                  <p>登录已保存的账户，找回你的应用；或直接匿名开始一个新的。</p>
-                  <div className="login-box">
-                    <input
-                      type="email"
-                      value={loginEmail}
-                      onChange={(e) => setLoginEmail(e.target.value)}
-                      placeholder="you@example.com"
-                      aria-label="邮箱"
-                    />
-                    <input
-                      type="password"
-                      value={loginPassword}
-                      onChange={(e) => setLoginPassword(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === 'Enter') void loginExisting(); }}
-                      placeholder="密码"
-                      aria-label="密码"
-                    />
-                    {loginError ? <div className="login-err">{loginError}</div> : null}
-                    <div className="save-row">
-                      <button
-                        type="button"
-                        className="btn primary"
-                        disabled={loggingIn || !loginEmail.includes('@') || loginPassword.length < 6}
-                        onClick={() => void loginExisting()}
-                      >
-                        {loggingIn ? '登录中…' : '登录'}
-                      </button>
-                      <button type="button" className="btn" onClick={() => void startAnonymous()}>
-                        直接开始（匿名）
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              ) : null}
-              {!showLogin ? (
-              <div className="empty">
-                <h1>想做点什么？</h1>
-                <p className="returning-link">
-                  <button type="button" className="linklike" onClick={() => setShowLogin(true)}>
-                    换设备了？登录已有账户
-                  </button>
-                </p>
-                <p>
-                  描述你想要的网站或工具，Alex 会把它建出来。
-                  <br />
-                  不需要写代码，也不需要注册。
-                </p>
-                <div className="examples">
-                  {[
-                    ['📔', '记录每日心情的应用', '日期、心情等级、备注，数据存在浏览器里'],
-                    ['✅', '一个待办清单', '可增删、可标记完成、可筛选'],
-                    ['⏱️', '番茄钟计时器', '25 分钟倒计时、专注历史记录'],
-                  ].map(([icon, title, sub]) => (
-                    <button
-                      type="button"
-                      key={title}
-                      onClick={() => {
-                        setInput(`做一个${title}：${sub}`);
-                        document.querySelector<HTMLTextAreaElement>('textarea')?.focus();
-                      }}
-                    >
-                      <span className="ex-icon">{icon}</span>
-                      <span>
-                        {title}
-                        <small>{sub}</small>
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ) : null}
-              </>
+              <EmptyState
+                showLogin={showLogin}
+                loginEmail={loginEmail}
+                loginPassword={loginPassword}
+                loginError={loginError}
+                loggingIn={loggingIn}
+                setLoginEmail={setLoginEmail}
+                setLoginPassword={setLoginPassword}
+                onLogin={() => void loginExisting()}
+                onAnonymous={() => void startAnonymous()}
+                onShowLogin={() => setShowLogin(true)}
+                onExampleClick={(text) => {
+                  setInput(text);
+                  const ta = document.querySelector<HTMLTextAreaElement>('textarea[name=composer]');
+                  ta?.focus();
+                }}
+              />
             ) : null}
 
             {messages.map((message) =>
               message.kind === 'user' ? (
-                <div className="msg me" key={message.messageId}>
-                  <div className="who">
-                    <span className="av me">你</span>你
-                  </div>
-                  <div className="bub">{message.text}</div>
-                </div>
+                <UserBubble key={message.messageId} text={message.text} />
               ) : (
-                <div className="msg" key={message.messageId}>
-                  <div className="who">
-                    <span className={`av ${message.agentHandle}`}>
-                      {AGENT_NAMES[message.agentHandle].charAt(0)}
-                    </span>
-                    {AGENT_NAMES[message.agentHandle]} · {AGENT_ROLE_LABELS[message.agentHandle]}
-                  </div>
-
-                  {message.text ? <div className="bub">{message.text}</div> : null}
-
-                  {message.files.map((file) => (
-                    <div className={`file-line ${file.state}`} key={file.toolCallId}>
-                      <span className="status">{file.state === 'done' ? '✓' : '▶'}</span>
-                      <span>{file.path ?? '准备写入…'}</span>
-                      {file.bytes !== null ? <span className="size">{file.bytes}B</span> : null}
-                    </div>
-                  ))}
-
-                  {message.steps.map((step, index) =>
-                    step.step === 'autofixing' ? (
-                      <div className="fix-note" key={`${message.messageId}-s${index}`}>
-                        <div className="fix-head">
-                          ⚠ 出了点问题，Alex 正在自己修（第 {step.attempt} 次）
-                        </div>
-                        {step.error ? (
-                          <details className="fix-detail">
-                            <summary>查看详情</summary>
-                            <pre>{step.error}</pre>
-                          </details>
-                        ) : null}
-                      </div>
-                    ) : (
-                      <div
-                        className={`file-line ${step.step === 'preview_ready' ? 'done' : 'writing'}`}
-                        key={`${message.messageId}-s${index}`}
-                      >
-                        <span className="status">{step.step === 'preview_ready' ? '✓' : '▶'}</span>
-                        <span>
-                          {step.step === 'installing' && '安装依赖 npm install'}
-                          {step.step === 'migrating' && '数据库迁移与安全检查'}
-                          {step.step === 'building' && '构建 npm run build'}
-                          {step.step === 'starting' && '启动开发服务器'}
-                          {step.step === 'preview_ready' && '预览就绪'}
-                        </span>
-                      </div>
-                    ),
-                  )}
-
-                  {message.finished && message.agentHandle === 'eng' && message.files.length > 0 ? (
-                    <div className="turn-summary">
-                      本轮改了 {message.files.length} 个文件：
-                      {message.files.map((f) => f.path).filter(Boolean).join('、')}
-                    </div>
-                  ) : null}
-
-                  {message.errors.map((error, index) => (
-                    <div className="bub error" key={`${message.messageId}-e${index}`}>
-                      {error}
-                    </div>
-                  ))}
-                </div>
+                <AgentBubble message={message} />
               ),
             )}
 
-
-            
-
-            {planFiles.length > 0 ? (
-              <div className="files-card">
-                <div className="files-header">{progressText(planFiles)}</div>
-                {planFiles.map((file) => (
-                  <div className={`file-line ${file.state}`} key={file.toolCallId}>
-                    <span className="status">
-                      {file.state === 'done' ? '✓' : file.state === 'writing' ? '▶' : '·'}
-                    </span>
-                    <span>{file.path}</span>
-                    {file.bytes !== null ? <span className="size">{file.bytes}B</span> : null}
-                    {file.state === 'planned' ? <span className="size">待生成</span> : null}
-                  </div>
-                ))}
-              </div>
-            ) : null}
+            {planFiles.length > 0 ? <PlanTree files={planFiles} /> : null}
 
             {log.length > 0 ? (
-              <details className="activity">
-                <summary>▸ 活动日志 · {log.length} 条</summary>
-                <div className="log">
-                  {log.map((line, index) => (
-                    <div key={index}>{line}</div>
-                  ))}
-                </div>
-              </details>
+              <Collapsible>
+                <CollapsibleTrigger className="text-xs text-muted-foreground hover:text-foreground transition-colors">
+                  ▸ 活动日志 · {log.length} 条
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <pre className="mt-2 p-3 bg-muted rounded-md text-xs font-mono overflow-x-auto max-h-40 overflow-y-auto">
+                    {log.map((line, i) => (
+                      <div key={i}>{line}</div>
+                    ))}
+                  </pre>
+                </CollapsibleContent>
+              </Collapsible>
             ) : null}
 
-            {fatal ? <div className="bub error">{fatal}</div> : null}
+            {fatal ? (
+              <Alert variant="destructive">
+                <AlertDescription>{fatal}</AlertDescription>
+              </Alert>
+            ) : null}
           </div>
 
-          <div className="composer">
-            <textarea
+          {/* Composer */}
+          <div className="border-t p-3 space-y-3">
+            {gateFinding ? (
+              <Card>
+                <CardContent className="pt-4 space-y-2">
+                  <h4 className="text-sm font-semibold text-destructive">⚠ 安全检查未通过</h4>
+                  <p className="text-sm text-muted-foreground">
+                    检测到一条过宽的数据访问策略，<strong>已回滚，未对外暴露任何数据</strong>。
+                    Alex 会重写这部分 —— 安全问题不自动重试，需要你确认后继续。
+                  </p>
+                  <details className="text-xs">
+                    <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
+                      查看详情
+                    </summary>
+                    <pre className="mt-2 p-2 bg-muted rounded text-xs overflow-x-auto">
+                      {gateFinding.code}
+                      {'\n'}
+                      {gateFinding.detail}
+                    </pre>
+                  </details>
+                  <Button
+                    variant="default"
+                    onClick={() => {
+                      setGateFinding(null);
+                      setInput('让 Alex 重写');
+                      document.querySelector<HTMLTextAreaElement>('textarea[name=composer]')?.focus();
+                    }}
+                  >
+                    让 Alex 重写
+                  </Button>
+                </CardContent>
+              </Card>
+            ) : null}
+
+            {stopped ? (
+              <Alert>
+                <AlertDescription className="flex items-center justify-between gap-2">
+                  <span>已停止 —— 已生成的文件都保留了。</span>
+                  <div className="flex gap-2">
+                    <Button
+                      size="sm"
+                      variant="default"
+                      onClick={() => {
+                        setStopped(false);
+                        document.querySelector<HTMLTextAreaElement>('textarea[name=composer]')?.focus();
+                      }}
+                    >
+                      继续刚才的
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        sessionIdRef.current = `s-${Date.now()}`;
+                        setMessages([]);
+                        setPlanFiles([]);
+                        setPreviewUrl(null);
+                        setStopped(false);
+                        setLog([]);
+                      }}
+                    >
+                      换个方向重来
+                    </Button>
+                  </div>
+                </AlertDescription>
+              </Alert>
+            ) : null}
+
+            <Textarea
+              name="composer"
               maxLength={4000}
               value={input}
               onChange={(event) => setInput(event.target.value)}
@@ -801,196 +709,392 @@ export function Workspace() {
               placeholder="描述你想做的东西…"
               aria-label="描述你想做的东西"
               disabled={streaming}
+              className="min-h-20 resize-none"
             />
-            {gateFinding ? (
-              <div className="gate-card">
-                <h4>⚠ 安全检查未通过</h4>
-                <p>
-                  检测到一条过宽的数据访问策略，<strong>已回滚，未对外暴露任何数据</strong>。
-                  Alex 会重写这部分 —— 安全问题不自动重试，需要你确认后继续。
-                </p>
-                <details className="fix-detail">
-                  <summary>查看详情</summary>
-                  <pre>
-                    {gateFinding.code}
-                    {'\n'}
-                    {gateFinding.detail}
-                  </pre>
-                </details>
-                <div className="row">
-                  <button
-                    type="button"
-                    className="btn primary"
-                    onClick={() => {
-                      setGateFinding(null);
-                      setInput('让 Alex 重写');
-                      document.querySelector<HTMLTextAreaElement>('textarea')?.focus();
-                    }}
-                  >
-                    让 Alex 重写
-                  </button>
-                </div>
-              </div>
-            ) : null}
-
-            {stopped ? (
-              <div className="stopped-banner">
-                <span>已停止 —— 已生成的文件都保留了。</span>
-                <div className="stopped-actions">
-                  <button
-                    type="button"
-                    className="btn primary"
-                    onClick={() => {
-                      setStopped(false);
-                      document.querySelector<HTMLTextAreaElement>('textarea')?.focus();
-                    }}
-                  >
-                    继续刚才的
-                  </button>
-                  <button
-                    type="button"
-                    className="btn"
-                    onClick={() => {
-                      // 换个方向重来：新会话，对话与预览清空（沙箱文件可保留）
-                      sessionIdRef.current = `s-${Date.now()}`;
-                      setMessages([]);
-                      setPlanFiles([]);
-                      setPreviewUrl(null);
-                      setStopped(false);
-                      setLog([]);
-                    }}
-                  >
-                    换个方向重来
-                  </button>
-                </div>
-              </div>
-            ) : null}
-            <div className="composer-row">
+            <div className="flex items-center gap-2">
               {streaming ? (
-                <button type="button" className="btn danger" onClick={() => abortRef.current?.abort()}>
+                <Button variant="destructive" onClick={() => abortRef.current?.abort()}>
                   ■ 停止
-                </button>
+                </Button>
               ) : (
-                <button
-                  type="button"
-                  className="btn primary"
+                <Button
+                  variant="default"
                   onClick={() => void submit()}
                   disabled={input.trim().length === 0}
                 >
                   开始
-                </button>
+                </Button>
               )}
-              <span className="spacer" />
-              <span className="pill">⌘↩ 发送</span>
+              <div className="flex-1" />
+              <Badge variant="secondary">⌘↩ 发送</Badge>
             </div>
           </div>
         </section>
 
-        <section className="preview" aria-label="预览">
-          <div className="preview-bar">
-            <button
-              type="button"
-              className={`btn small ${pane === 'preview' ? 'primary' : ''}`}
-              onClick={() => setPane('preview')}
-            >
-              预览
-            </button>
-            <button
-              type="button"
-              className={`btn small ${pane === 'code' ? 'primary' : ''}`}
-              onClick={() => void openCodePane()}
-            >
-              代码
-            </button>
-            {pane === 'preview' ? (
-              <>
-            <button
-              type="button"
-              className={`btn small ${device === 'desktop' ? 'primary' : ''}`}
-              onClick={() => setDevice('desktop')}
-            >
-              桌面
-            </button>
-            <button
-              type="button"
-              className={`btn small ${device === 'tablet' ? 'primary' : ''}`}
-              onClick={() => setDevice('tablet')}
-            >
-              平板
-            </button>
-            <button
-              type="button"
-              className={`btn small ${device === 'mobile' ? 'primary' : ''}`}
-              onClick={() => setDevice('mobile')}
-            >
-              手机
-            </button>
-              </>
-            ) : null}
-            <div className="spacer" />
-            {identity ? (
-              <a
-                className="btn small"
-                href={`/api/export?session=${encodeURIComponent(sessionIdRef.current)}`}
-                download
+        {/* Preview pane */}
+        {previewOpen ? (
+          <section className="flex flex-col min-h-0 bg-muted/30" aria-label="预览">
+            <div className="flex items-center gap-1 p-2 border-b bg-background">
+              <Button
+                size="sm"
+                variant={pane === 'preview' ? 'default' : 'outline'}
+                onClick={() => setPane('preview')}
               >
-                导出 zip
-              </a>
+                预览
+              </Button>
+              <Button
+                size="sm"
+                variant={pane === 'code' ? 'default' : 'outline'}
+                onClick={() => void openCodePane()}
+              >
+                代码
+              </Button>
+              {pane === 'preview' ? (
+                <>
+                  <Button
+                    size="sm"
+                    variant={device === 'desktop' ? 'default' : 'outline'}
+                    onClick={() => setDevice('desktop')}
+                  >
+                    桌面
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant={device === 'tablet' ? 'default' : 'outline'}
+                    onClick={() => setDevice('tablet')}
+                  >
+                    平板
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant={device === 'mobile' ? 'default' : 'outline'}
+                    onClick={() => setDevice('mobile')}
+                  >
+                    手机
+                  </Button>
+                </>
+              ) : null}
+              <div className="flex-1" />
+              {identity ? (
+                <a
+                  href={`/api/export?session=${encodeURIComponent(sessionIdRef.current)}`}
+                  download
+                  className="inline-flex items-center justify-center rounded-md text-sm font-medium border border-input bg-background hover:bg-accent h-7 px-2.5 transition-colors"
+                >
+                  导出 zip
+                </a>
+              ) : null}
+              {previewUrl ? (
+                <Badge variant="secondary">
+                  <a href={previewUrl} target="_blank" rel="noopener noreferrer">↗ 新标签页</a>
+                </Badge>
+              ) : (
+                <Badge variant="secondary">尚未生成</Badge>
+              )}
+            </div>
+
+            <div className="flex-1 overflow-hidden flex items-center justify-center p-4">
+              {pane === 'code' ? (
+                <CodeViewer files={codeFiles} current={codeFile} onOpen={(p) => void openFile(p)} />
+              ) : previewUrl ? (
+                <DeviceFrame device={device} url={previewUrl} nonce={previewNonce} />
+              ) : (
+                <span className="text-sm text-muted-foreground">预览会在应用能跑起来之后出现</span>
+              )}
+            </div>
+          </section>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+/* ---- Sub-components ----------------------------------------------------- */
+
+function EmptyState({
+  showLogin,
+  loginEmail,
+  loginPassword,
+  loginError,
+  loggingIn,
+  setLoginEmail,
+  setLoginPassword,
+  onLogin,
+  onAnonymous,
+  onShowLogin,
+  onExampleClick,
+}: {
+  showLogin: boolean;
+  loginEmail: string;
+  loginPassword: string;
+  loginError: string | null;
+  loggingIn: boolean;
+  setLoginEmail: (v: string) => void;
+  setLoginPassword: (v: string) => void;
+  onLogin: () => void;
+  onAnonymous: () => void;
+  onShowLogin: () => void;
+  onExampleClick: (text: string) => void;
+}) {
+  if (showLogin) {
+    return (
+      <div className="max-w-md mx-auto space-y-4 pt-8">
+        <h1 className="text-2xl font-semibold">登录已有账户</h1>
+        <p className="text-sm text-muted-foreground">
+          登录已保存的账户，找回你的应用；或直接匿名开始一个新的。
+        </p>
+        <Card>
+          <CardContent className="pt-4 space-y-3">
+            <Input
+              type="email"
+              value={loginEmail}
+              onChange={(e) => setLoginEmail(e.target.value)}
+              placeholder="you@example.com"
+              aria-label="邮箱"
+            />
+            <Input
+              type="password"
+              value={loginPassword}
+              onChange={(e) => setLoginPassword(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') onLogin(); }}
+              placeholder="密码"
+              aria-label="密码"
+            />
+            {loginError ? (
+              <Alert variant="destructive">
+                <AlertDescription>{loginError}</AlertDescription>
+              </Alert>
             ) : null}
-            {previewUrl ? (
-              <a className="pill" href={previewUrl} target="_blank" rel="noopener noreferrer">
-                ↗ 新标签页
-              </a>
-            ) : (
-              <span className="pill">尚未生成</span>
-            )}
-          </div>
-          <div className="preview-stage">
-            {pane === 'code' ? (
-              <div className="code-viewer">
-                <div className="code-tree">
-                  {codeFiles.length === 0 ? (
-                    <div className="code-empty">还没有生成文件</div>
-                  ) : (
-                    codeFiles.map((f) => (
-                      <button
-                        type="button"
-                        key={f}
-                        className={`code-tree-item ${codeFile?.path === f ? 'active' : ''}`}
-                        onClick={() => void openFile(f)}
-                      >
-                        {f}
-                      </button>
-                    ))
-                  )}
-                </div>
-                <div className="code-content">
-                  {codeFile ? (
-                    <>
-                      <div className="code-path">{codeFile.path} · 只读</div>
-                      <pre className="code-body">
-                        <code dangerouslySetInnerHTML={{ __html: highlight(codeFile.content, codeFile.path) }} />
-                      </pre>
-                    </>
-                  ) : (
-                    <div className="code-empty">选择左侧文件查看内容</div>
-                  )}
-                </div>
-              </div>
-            ) : previewUrl ? (
-              <div className={`device device-${device}`}>
-                <iframe
-                  key={`${previewUrl}-${previewNonce}`}
-                  src={previewUrl}
-                  title="应用预览"
-                  className="preview-frame"
-                />
-              </div>
-            ) : (
-              <span>预览会在应用能跑起来之后出现</span>
-            )}
-          </div>
-        </section>
+            <div className="flex gap-2">
+              <Button
+                variant="default"
+                disabled={loggingIn || !loginEmail.includes('@') || loginPassword.length < 6}
+                onClick={onLogin}
+              >
+                {loggingIn ? '登录中…' : '登录'}
+              </Button>
+              <Button variant="outline" onClick={onAnonymous}>
+                直接开始（匿名）
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+  return (
+    <div className="max-w-2xl mx-auto space-y-6 pt-8 text-center">
+      <h1 className="text-3xl font-semibold tracking-tight">想做点什么？</h1>
+      <p>
+        <button
+          type="button"
+          className="text-sm text-muted-foreground hover:text-foreground underline underline-offset-2"
+          onClick={onShowLogin}
+        >
+          换设备了？登录已有账户
+        </button>
+      </p>
+      <p className="text-sm text-muted-foreground">
+        描述你想要的网站或工具，Alex 会把它建出来。
+        <br />
+        不需要写代码，也不需要注册。
+      </p>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-4">
+        {[
+          ['📔', '记录每日心情的应用', '日期、心情等级、备注，数据存在浏览器里'],
+          ['✅', '一个待办清单', '可增删、可标记完成、可筛选'],
+          ['⏱️', '番茄钟计时器', '25 分钟倒计时、专注历史记录'],
+        ].map(([icon, title, sub]) => (
+          <button
+            type="button"
+            key={title}
+            onClick={() => onExampleClick(`做一个${title}：${sub}`)}
+            className="text-left p-4 rounded-lg border bg-card hover:bg-accent transition-colors"
+          >
+            <div className="text-2xl mb-2">{icon}</div>
+            <div className="font-medium">
+              {title}
+              <div className="text-xs text-muted-foreground mt-1">{sub}</div>
+            </div>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function UserBubble({ text }: { text: string }) {
+  return (
+    <div className="flex justify-end">
+      <div className="max-w-[80%] rounded-2xl rounded-br-sm bg-primary text-primary-foreground px-4 py-2 text-sm">
+        {text}
+      </div>
+    </div>
+  );
+}
+
+function AgentBubble({ message }: { message: AgentMessage }) {
+  const av = AGENT_NAMES[message.agentHandle].charAt(0);
+  const colorByAgent: Record<AgentHandle, string> = {
+    lead: 'bg-zinc-500',
+    pm: 'bg-purple-500',
+    eng: 'bg-blue-500',
+  };
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+        <span className={`size-6 rounded-full ${colorByAgent[message.agentHandle]} text-white grid place-items-center text-[10px] font-bold`}>
+          {av}
+        </span>
+        <span>{AGENT_NAMES[message.agentHandle]} · {AGENT_ROLE_LABELS[message.agentHandle]}</span>
+      </div>
+
+      {message.text ? (
+        <div className="rounded-2xl rounded-bl-sm bg-muted px-4 py-2 text-sm max-w-[80%]">
+          {message.text}
+        </div>
+      ) : null}
+
+      <div className="space-y-1">
+        {message.files.map((file) => (
+          <FileRow key={file.toolCallId} file={file} />
+        ))}
+        {message.steps.map((step, i) =>
+          step.step === 'autofixing' ? (
+            <Alert key={`${message.messageId}-s${i}`}>
+              <AlertTitle className="text-xs">⚠ 出了点问题，Alex 正在自己修（第 {step.attempt} 次）</AlertTitle>
+              {step.error ? (
+                <details className="text-xs mt-1">
+                  <summary className="cursor-pointer text-muted-foreground">查看详情</summary>
+                  <pre className="mt-1 p-2 bg-muted rounded overflow-x-auto">{step.error}</pre>
+                </details>
+              ) : null}
+            </Alert>
+          ) : (
+            <StepRow key={`${message.messageId}-s${i}`} step={step} />
+          ),
+        )}
+      </div>
+
+      {message.finished && message.agentHandle === 'eng' && message.files.length > 0 ? (
+        <div className="text-xs text-muted-foreground">
+          本轮改了 {message.files.length} 个文件：
+          {message.files.map((f) => f.path).filter(Boolean).join('、')}
+        </div>
+      ) : null}
+
+      {message.errors.map((error, i) => (
+        <Alert key={`${message.messageId}-e${i}`} variant="destructive">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      ))}
+    </div>
+  );
+}
+
+function FileRow({ file }: { file: FileEntry }) {
+  const color =
+    file.state === 'done' ? 'text-emerald-600' :
+    file.state === 'writing' ? 'text-blue-600' :
+    'text-zinc-400';
+  const icon = file.state === 'done' ? '✓' : file.state === 'writing' ? '▶' : '·';
+  return (
+    <div className="flex items-center gap-2 text-xs font-mono px-2">
+      <span className={color}>{icon}</span>
+      <span className="flex-1 truncate">{file.path ?? '准备写入…'}</span>
+      {file.bytes !== null ? <span className="text-muted-foreground">{file.bytes}B</span> : null}
+      {file.state === 'planned' ? <span className="text-muted-foreground">待生成</span> : null}
+    </div>
+  );
+}
+
+function StepRow({ step }: { step: StepEntry }) {
+  const label =
+    step.step === 'installing' ? '安装依赖 npm install' :
+    step.step === 'migrating' ? '数据库迁移与安全检查' :
+    step.step === 'building' ? '构建 npm run build' :
+    step.step === 'starting' ? '启动开发服务器' :
+    step.step === 'preview_ready' ? '预览就绪' :
+    step.step;
+  const done = step.step === 'preview_ready';
+  const color = done ? 'text-emerald-600' : 'text-blue-600';
+  const icon = done ? '✓' : '▶';
+  return (
+    <div className="flex items-center gap-2 text-xs font-mono px-2">
+      <span className={color}>{icon}</span>
+      <span className="flex-1">{label}</span>
+    </div>
+  );
+}
+
+function PlanTree({ files }: { files: FileEntry[] }) {
+  return (
+    <Card>
+      <CardContent className="pt-4 space-y-1">
+        <div className="text-xs font-medium text-muted-foreground mb-2">
+          {progressText(files)}
+        </div>
+        {files.map((file) => (
+          <FileRow key={file.toolCallId} file={file} />
+        ))}
+      </CardContent>
+    </Card>
+  );
+}
+
+function DeviceFrame({ device, url, nonce }: { device: string; url: string; nonce: number }) {
+  const dim =
+    device === 'mobile' ? 'w-[375px] h-[667px]' :
+    device === 'tablet' ? 'w-[768px] h-[1024px]' :
+    'w-full h-full';
+  return (
+    <div className={`${dim} bg-background border rounded-lg overflow-hidden shadow-sm`}>
+      <iframe
+        key={`${url}-${nonce}`}
+        src={url}
+        title="应用预览"
+        className="w-full h-full"
+      />
+    </div>
+  );
+}
+
+function CodeViewer({
+  files, current, onOpen,
+}: {
+  files: string[];
+  current: { path: string; content: string } | null;
+  onOpen: (p: string) => void;
+}) {
+  return (
+    <div className="w-full h-full grid grid-cols-[200px_1fr] bg-background border rounded-lg overflow-hidden">
+      <div className="border-r overflow-y-auto p-2 space-y-0.5">
+        {files.length === 0 ? (
+          <div className="text-xs text-muted-foreground p-2">还没有生成文件</div>
+        ) : (
+          files.map((f) => (
+            <button
+              type="button"
+              key={f}
+              className={`block w-full text-left text-xs font-mono px-2 py-1 rounded hover:bg-accent ${current?.path === f ? 'bg-accent' : ''}`}
+              onClick={() => onOpen(f)}
+            >
+              {f}
+            </button>
+          ))
+        )}
+      </div>
+      <div className="overflow-auto p-3 bg-zinc-50 dark:bg-zinc-950">
+        {current ? (
+          <>
+            <div className="text-xs text-muted-foreground mb-2">{current.path} · 只读</div>
+            <pre className="text-xs font-mono">
+              <code dangerouslySetInnerHTML={{ __html: highlight(current.content, current.path) }} />
+            </pre>
+          </>
+        ) : (
+          <div className="text-xs text-muted-foreground">选择左侧文件查看内容</div>
+        )}
       </div>
     </div>
   );
