@@ -313,8 +313,22 @@ export function Workspace() {
     }
   }, []);
 
-  // Silent anonymous sign-in on mount
+  // Silent anonymous sign-in on mount. After 4s without identity, fall back
+  // to dev mode — if Supabase is down or unreachable, users still see a
+  // working app instead of hanging on "连接中".
   useEffect(() => {
+    let cancelled = false;
+    const timeoutId = setTimeout(() => {
+      if (cancelled || sessionIdRef.current) return;
+      // Timeout: Supabase didn't respond in time → dev fallback
+      let devId = localStorage.getItem('forge-dev-session');
+      if (!devId) {
+        devId = `dev-${Math.random().toString(36).slice(2, 8)}`;
+        localStorage.setItem('forge-dev-session', devId);
+      }
+      sessionIdRef.current = devId;
+      setIdentity(devId);
+    }, 4000);
     void (async () => {
       try {
         const { createClient } = await import('@supabase/supabase-js');
@@ -388,7 +402,18 @@ export function Workspace() {
           }
         }
       } catch {
-        setIdentity(null);
+        // Supabase failed (network down, aborted, project missing).
+        // Fall back to dev mode so the UI works instead of hanging on "连接中".
+        let devId = localStorage.getItem('forge-dev-session');
+        if (!devId) {
+          devId = `dev-${Math.random().toString(36).slice(2, 8)}`;
+          localStorage.setItem('forge-dev-session', devId);
+        }
+        sessionIdRef.current = devId;
+        setIdentity(devId);
+      } finally {
+        clearTimeout(timeoutId);
+        cancelled = true;
       }
     })();
   }, []);

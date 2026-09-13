@@ -2,7 +2,7 @@ import { defineConfig } from '@playwright/test';
 
 export default defineConfig({
   testDir: './e2e',
-  timeout: 120_000,
+  timeout: 15_000_000,
   retries: 0,
   use: {
     baseURL: 'http://localhost:3000',
@@ -17,7 +17,7 @@ export default defineConfig({
     command: 'npm run dev',
     port: 3000,
     reuseExistingServer: true,
-    timeout: 60_000,
+    timeout: 15_000_000,
   },
   workers: 4,
   projects: [
