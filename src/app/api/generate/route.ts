@@ -5,6 +5,11 @@ import { encodeEvent } from '../../../transport/sse.ts';
 import { keyFor, ledgerPort, requestScopedCredits, withRequestKey } from '../../../credits/route-credits.ts';
 import { sessionVerifierFromEnv } from '../../../auth/session.ts';
 import { SharedProjectGate } from '../../../backend/supabase-gate.ts';
+import { startGcScheduler } from '../../../gc/scheduler.ts';
+
+// The long-running process IS the cron carrier (ticket 14): the daily GC
+// sweep rides the same process as the app. One timer per process.
+void startGcScheduler();
 
 export const runtime = 'nodejs';
 

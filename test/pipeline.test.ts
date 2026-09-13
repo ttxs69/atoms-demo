@@ -814,3 +814,21 @@ test('a fresh orchestrator (simulated restart) finds the old sandbox and iterate
   assert.equal(sandboxId2, sandboxId1, 'the SAME sandbox — not a new one');
   assert.equal(await sandbox.readFile(sandboxId2, 'src/App.tsx'), 'v2');
 });
+
+// ─── GC 调度：进程内每日 sweep ──────────────────────────────────────────────
+
+test('the GC scheduler runs a sweep on boot and daily after, and can be stopped', async () => {
+  const { startGcScheduler } = await import('../src/gc/scheduler.ts');
+  const calls: number[] = [];
+  const stop = startGcScheduler(
+    // 注入 sweep 桩 + 快时钟：每天一次 → 这里 10ms 一次验证节奏
+    async () => { calls.push(Date.now()); },
+    { intervalMs: 10 },
+  );
+  await new Promise(r => setTimeout(r, 35));
+  stop();
+  const after = calls.length;
+  await new Promise(r => setTimeout(r, 25));
+  assert.ok(calls.length >= 3, `ran periodically (${calls.length})`);
+  assert.equal(calls.length, after, 'stopped cleanly');
+});
