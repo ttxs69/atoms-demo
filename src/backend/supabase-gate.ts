@@ -44,16 +44,17 @@ export class SharedProjectGate implements GatePort {
 
     await this.#db.query('BEGIN');
     try {
-      // Embedded Postgres rejects multi-statement text — execute
-      // sequentially, stripping comment-only lines per statement.
-      for (const statement of ctx.migrationSql.split(';')) {
-        const stripped = statement
-          .split('\n')
-          .filter((line) => !line.trim().startsWith('--'))
-          .join('\n')
-          .trim();
-        if (stripped.length > 0) {
-          await this.#db.query(stripped);
+      // Embedded Postgres rejects multi-statement text. Strip -- comment
+      // lines FIRST (comments may contain semicolons that would otherwise
+      // split mid-comment), then execute statement by statement.
+      const noComments = ctx.migrationSql
+        .split('\n')
+        .filter((line) => !line.trim().startsWith('--'))
+        .join('\n');
+      for (const statement of noComments.split(';')) {
+        const trimmed = statement.trim();
+        if (trimmed.length > 0) {
+          await this.#db.query(trimmed);
         }
       }
 
