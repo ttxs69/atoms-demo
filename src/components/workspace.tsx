@@ -509,7 +509,7 @@ export function Workspace() {
       </header>
 
       {/* Body: chat + preview */}
-      <div className={`flex-1 grid grid-cols-1 lg:grid-cols-[1fr_minmax(420px,1fr)] min-h-0 ${previewOpen ? '' : 'lg:grid-cols-1'}`}>
+      <div className={`flex-1 grid grid-cols-1 min-h-0 ${previewOpen ? 'lg:grid-cols-[1fr_minmax(420px,1fr)]' : ''}`}>
         {/* Chat pane */}
         <section className="flex flex-col min-h-0 border-r" aria-label="对话">
           <div className="flex-1 overflow-y-auto px-4 py-6 space-y-4">
@@ -745,7 +745,7 @@ function EmptyState({
   onExampleClick: (text: string) => void;
 }) {
   return (
-    <div className="max-w-2xl mx-auto space-y-6 pt-8 text-center">
+    <div className="mx-auto max-w-3xl px-4 space-y-6 pt-8 pb-12 text-center">
       <h1 className="text-3xl font-semibold tracking-tight">想做点什么？</h1>
       <p>
         <a
