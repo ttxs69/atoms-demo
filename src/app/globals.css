@@ -617,3 +617,36 @@ details.activity .log {
   font-size: 11px;
   margin-top: 2px;
 }
+
+/* First-save invitation (anonymous → permanent) ---------------------------- */
+.save-invite {
+  border: 1px solid #bbf7d0;
+  background: #f0fdf4;
+  border-radius: var(--r);
+  padding: 14px 16px;
+  margin: 12px 0;
+}
+.save-title {
+  font-weight: 600;
+  font-size: 14px;
+  margin-bottom: 4px;
+}
+.save-note {
+  font-size: 12px;
+  color: var(--n5);
+  margin-bottom: 10px;
+}
+.save-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.save-row input {
+  flex: 1;
+  min-width: 180px;
+  border: 1px solid var(--n2);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font: inherit;
+  font-size: 13px;
+}

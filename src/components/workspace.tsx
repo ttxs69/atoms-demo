@@ -100,6 +100,12 @@ export function Workspace() {
   const [stopped, setStopped] = useState(false);
   const [gateFinding, setGateFinding] = useState<{ code: string; detail: string } | null>(null);
   const [identity, setIdentity] = useState<string | null>(null);
+  // 升级是匿名身份唯一的保存路径——首次预览出现时主动邀请，而不是
+  // 把它埋在顶栏小按钮里等人发现。
+  const [saveInvite, setSaveInvite] = useState(false);
+  const [saveEmail, setSaveEmail] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [upgraded, setUpgraded] = useState(false);
   const [pane, setPane] = useState<'preview' | 'code'>('preview');
   const [previewOpen, setPreviewOpen] = useState(false);
   const [codeFiles, setCodeFiles] = useState<string[]>([]);
@@ -155,6 +161,7 @@ export function Workspace() {
       // actually refreshes to the new build.
       setPreviewUrl(event.url);
       setPreviewNonce((n) => n + 1);
+      maybeOfferSave();
     } else if (event.type === 'interrupted') {
       setStopped(true);
     } else if (event.type === 'gate_failed') {
@@ -370,6 +377,7 @@ export function Workspace() {
             if (res.ok) {
               const data2 = (await res.json()) as { url?: string; files?: string[] };
               if (data2.url) {
+                maybeOfferSave();
                 setPreviewUrl(data2.url);
                 setPreviewNonce((n) => n + 1);
                 setPreviewOpen(true);
@@ -397,21 +405,35 @@ export function Workspace() {
     })();
   }, []);
 
-  const upgrade = useCallback(async () => {
-    const email = window.prompt('输入邮箱，把工作区升级为永久账户：');
-    if (!email) return;
-    const res = await fetch('/api/auth/upgrade', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ email }),
-    });
-    if (res.ok) {
-      window.alert('升级成功 —— 换设备也能找回了。');
-    } else {
-      const data = (await res.json().catch(() => null)) as { error?: string } | null;
-      window.alert(data?.error ?? '升级失败，请稍后再试。');
+  const maybeOfferSave = useCallback(() => {
+    if (typeof window === 'undefined') return;
+    if (localStorage.getItem('forge-save-dismissed')) return;
+    // Dev 降级身份没有 Supabase，升级端点会 503——不出邀请。
+    if (identity?.startsWith('dev-')) return;
+    setSaveInvite(true);
+  }, [identity]);
+
+  const submitSave = useCallback(async () => {
+    if (!saveEmail.includes('@')) return;
+    setSaving(true);
+    try {
+      const res = await fetch('/api/auth/upgrade', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ email: saveEmail }),
+      });
+      if (res.ok) {
+        setUpgraded(true);
+        setSaveInvite(false);
+        localStorage.setItem('forge-save-dismissed', '1');
+      } else {
+        const data = (await res.json().catch(() => null)) as { error?: string } | null;
+        window.alert(data?.error ?? '升级失败，请稍后再试。');
+      }
+    } finally {
+      setSaving(false);
     }
-  }, []);
+  }, [saveEmail]);
 
   const submit = useCallback(async () => {
     const message = input.trim();
@@ -484,9 +506,13 @@ export function Workspace() {
           <span className="pill ok">运行中</span>
         ) : null}
         {identity ? (
-          <button type="button" className="btn small" onClick={() => void upgrade()} title={identity}>
-            升级保存
-          </button>
+          upgraded ? (
+            <span className="pill ok">已绑定邮箱</span>
+          ) : (
+            <button type="button" className="btn small" onClick={() => setSaveInvite(true)} title={identity}>
+              升级保存
+            </button>
+          )
         ) : (
           <span className="pill">连接中…</span>
         )}
@@ -607,6 +633,45 @@ export function Workspace() {
                 </div>
               ),
             )}
+
+            {saveInvite && !upgraded ? (
+              <div className="save-invite">
+                <div className="save-title">🎉 应用跑起来了 —— 想保住它吗？</div>
+                <p className="save-note">
+                  匿名身份清了缓存就没了。留个邮箱，升级成永久账户，换设备也能找回这个应用。
+                </p>
+                <div className="save-row">
+                  <input
+                    type="email"
+                    value={saveEmail}
+                    onChange={(e) => setSaveEmail(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') void submitSave();
+                    }}
+                    placeholder="you@example.com"
+                    aria-label="邮箱"
+                  />
+                  <button
+                    type="button"
+                    className="btn primary"
+                    disabled={saving || !saveEmail.includes('@')}
+                    onClick={() => void submitSave()}
+                  >
+                    {saving ? '保存中…' : '保住它'}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={() => {
+                      setSaveInvite(false);
+                      localStorage.setItem('forge-save-dismissed', '1');
+                    }}
+                  >
+                    以后再说
+                  </button>
+                </div>
+              </div>
+            ) : null}
 
             {planFiles.length > 0 ? (
               <div className="files-card">
