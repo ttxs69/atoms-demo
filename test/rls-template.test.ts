@@ -4,7 +4,6 @@ import assert from 'node:assert/strict';
 import {
   detectRlsGaps,
   extractCreatedTables,
-  injectRlsTemplate,
 } from '../src/backend/rls-template.ts';
 
 test('injector appends the template per created table, after the model SQL', () => {
@@ -46,4 +45,65 @@ test('detector names every table without RLS; passes when all are covered', () =
   assert.equal(failures[0]!.code, 'RLS_DISABLED');
   assert.ok(failures[0]!.detail.includes('secrets'));
   assert.deepEqual(detectRlsGaps([{ name: 'ok', rlsEnabled: true }]), []);
+});
+
+// ─── ticket 03: the shared-project gate (real Postgres semantics) ─────────
+
+import { PGlite } from '@electric-sql/pglite';
+import { SharedProjectGate } from '../src/backend/supabase-gate.ts';
+import { injectRlsTemplate } from '../src/backend/rls-template.ts';
+import type { SqlClient } from '../src/credits/ledger.ts';
+
+async function makeGateDb(): Promise<SqlClient> {
+  const db = new PGlite();
+  // Real Supabase has these roles; pglite doesn't — create them so the
+  // template's REVOKE executes against the same shape as production.
+  await db.query('CREATE ROLE anon');
+  await db.query('CREATE ROLE authenticated');
+  const client = db as unknown as SqlClient;
+  (client as { transaction?: unknown }).transaction = async <T>(fn: (c: SqlClient) => Promise<T>) => {
+    await db.query('BEGIN');
+    try {
+      const out = await fn(client);
+      await db.query('COMMIT');
+      return out;
+    } catch (e) {
+      await db.query('ROLLBACK');
+      throw e;
+    }
+  };
+  return client;
+}
+
+test('gate passes an injected migration and the table survives; RLS verified', async () => {
+  const db = await makeGateDb();
+  const gate = new SharedProjectGate(db);
+  const sql = injectRlsTemplate('CREATE TABLE notes (id int, body text);', 'ws-1').sql;
+  const verdict = await gate.check({ sandboxId: 'sbx', workspaceId: 'ws-1', migrationSql: sql });
+  assert.equal(verdict.ok, true);
+  const check = await db.query<{ rowsecurity: boolean }>(
+    `SELECT rowsecurity FROM pg_tables WHERE tablename = 'notes'`,
+  );
+  assert.equal(check.rows[0]!.rowsecurity, true);
+});
+
+test('gate FAILS unsafe SQL and rolls it back — the table never existed', async () => {
+  const db = await makeGateDb();
+  const gate = new SharedProjectGate(db);
+  // 模型 SQL 未经注入（防御纵深：即使注入被绕过，检测器兜底）
+  const verdict = await gate.check({
+    sandboxId: 'sbx',
+    workspaceId: 'ws-1',
+    migrationSql: 'CREATE TABLE naked (id int);',
+  });
+  assert.equal(verdict.ok, false);
+  assert.equal((verdict as { code: string }).code, 'RLS_DISABLED');
+  const after = await db.query(`SELECT 1 FROM pg_tables WHERE tablename = 'naked'`);
+  assert.equal(after.rows.length, 0, 'rolled back — 未对外暴露任何数据 is literal');
+});
+
+test('gate without a database (dev degraded mode) passes explicitly', async () => {
+  const gate = new SharedProjectGate(null);
+  const verdict = await gate.check({ sandboxId: 's', workspaceId: 'w', migrationSql: 'x' });
+  assert.equal(verdict.ok, true);
 });
