@@ -705,6 +705,8 @@ export function Workspace() {
                 </div>
               </div>
             ) : null}
+              </>
+            ) : null}
 
             {messages.map((message) =>
               message.kind === 'user' ? (
@@ -825,8 +827,6 @@ export function Workspace() {
                 </div>
               </div>
               ) : null}
-              </>
-            ) : null}
 
             {planFiles.length > 0 ? (
               <div className="files-card">
