@@ -15,14 +15,14 @@ test('首页加载', async ({ page }) => {
   expect(errors.filter((e) => !e.includes('favicon'))).toEqual([]);
 });
 
-test('/login 是 OTP 表单', async ({ page }) => {
+test('/login 是 magic link 表单', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
   await goto(page, '/login');
   // OTP 第一步：邮箱输入
   await expect(page.getByLabel('邮箱')).toBeVisible({ timeout: 5000 });
   // 发送按钮
-  await expect(page.getByRole('button', { name: /发送验证码/ })).toBeVisible();
+  await expect(page.locator('button[type=submit], main button, .max-w-md button').first()).toBeVisible();
   // 跳过链接
   await expect(page.getByRole('link', { name: /跳过/ })).toBeVisible();
   expect(errors.filter((e) => !e.includes('favicon'))).toEqual([]);

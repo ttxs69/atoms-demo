@@ -1,13 +1,9 @@
 'use client';
 
 /**
- * /login — OTP 邮件验证码登录。
- *
- * 为什么用 OTP 而非 magic link：magic link 依赖 Supabase 仪表板的 SITE_URL
- * 配置，目前是 localhost，会让邮件链接跳转到 localhost。
- * OTP 6 位数字码不需要 SITE_URL，也不依赖浏览器跳转。
- *
- * 体验：输入邮箱 → 收邮件 → 输入 6 位码 → 登录。
+ * /login — 邮件 magic link 登录（正路）。
+ * Supabase SITE_URL 已指向生产域名，邮件里的链接跳回本站 /auth/confirm。
+ * 注意：Supabase 免费层自带邮件限流 ~2-4 封/小时，够演示。
  */
 
 import { useState } from 'react';
@@ -15,56 +11,35 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 
-type Step = 'email' | 'code';
-
 export default function LoginPage() {
-  const [step, setStep] = useState<Step>('email');
   const [email, setEmail] = useState('');
-  const [code, setCode] = useState('');
   const [loading, setLoading] = useState(false);
+  const [sent, setSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [devCode, setDevCode] = useState<string | null>(null);
 
-  const requestOtp = async () => {
+  const sendLink = async () => {
     setLoading(true);
     setError(null);
-    const res = await fetch('/api/auth/otp/request', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ email }),
-    });
-    const data = (await res.json().catch(() => ({}))) as {
-      error?: string;
-      preview_url?: string;
-      dev_code?: string;
-    };
-    setLoading(false);
-    if (!res.ok) {
-      setError(data.error ?? '请求失败');
-      return;
+    try {
+      const { createClient } = await import('@supabase/supabase-js');
+      const url = process.env.NEXT_PUBLIC_APPS_SUPABASE_URL;
+      const key = process.env.NEXT_PUBLIC_APPS_SUPABASE_PUBLISHABLE_KEY;
+      if (!url || !key) throw new Error('认证服务未配置');
+      const supabase = createClient(url, key);
+      const { error: otpErr } = await supabase.auth.signInWithOtp({
+        email,
+        options: {
+          shouldCreateUser: true,
+          emailRedirectTo: `${window.location.origin}/auth/confirm`,
+        },
+      });
+      if (otpErr) throw otpErr;
+      setSent(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '发送失败');
+    } finally {
+      setLoading(false);
     }
-    setPreviewUrl(data.preview_url ?? null);
-    setDevCode(data.dev_code ?? null);
-    setStep('code');
-  };
-
-  const verifyOtp = async () => {
-    setLoading(true);
-    setError(null);
-    const res = await fetch('/api/auth/otp/verify', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ email, code }),
-    });
-    const data = await res.json().catch(() => ({}));
-    setLoading(false);
-    if (!res.ok) {
-      setError(data.error ?? '验证失败');
-      return;
-    }
-    // 登录成功，硬刷到工作区让 server 重新读 cookie
-    window.location.href = '/';
   };
 
   return (
@@ -74,25 +49,26 @@ export default function LoginPage() {
           <h1 className="text-2xl font-semibold tracking-tight text-center">
             Forge<span className="text-primary">.</span>
           </h1>
-          <div className="bg-amber-50 border border-amber-200 rounded p-3 space-y-2">
-            <p className="text-sm font-semibold text-amber-900">
-              ⚠ 演示环境未配真实邮件服务
-            </p>
-            <p className="text-xs text-amber-800">
-              当前用 Ethereal 假 SMTP，邮件不投到真实邮箱。
-              验证码会出现在弹出的链接里。
-            </p>
-            <a
-              href="https://ethereal.email/messages"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="block text-xs text-center text-amber-900 underline font-semibold"
-            >
-              打开 Ethereal 收件箱查看所有演示邮件 →
-            </a>
-          </div>
 
-          {step === 'email' ? (
+          {sent ? (
+            <div className="space-y-3 text-center">
+              <p className="text-sm text-muted-foreground">
+                登录链接已发到 <strong>{email}</strong>
+                <br />
+                打开邮件，点「Log In」即可回到 Forge。
+              </p>
+              <p className="text-xs text-muted-foreground">
+                没收到？检查垃圾邮件箱；Supabase 免费邮件服务每小时限发几封，稍等再试。
+              </p>
+              <button
+                type="button"
+                onClick={() => setSent(false)}
+                className="text-xs text-muted-foreground hover:text-foreground underline"
+              >
+                换个邮箱
+              </button>
+            </div>
+          ) : (
             <>
               <p className="text-sm text-muted-foreground text-center">
                 输入邮箱，登录保存你的项目，或匿名直接使用。
@@ -106,71 +82,17 @@ export default function LoginPage() {
                 autoComplete="email"
                 autoFocus
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter' && email.includes('@') && !loading) void requestOtp();
+                  if (e.key === 'Enter' && email.includes('@') && !loading) void sendLink();
                 }}
               />
               {error ? <p className="text-sm text-destructive">{error}</p> : null}
               <Button
-                onClick={() => void requestOtp()}
+                onClick={() => void sendLink()}
                 disabled={!email.includes('@') || loading}
                 className="w-full"
               >
-                {loading ? '发送中…' : '发送验证码'}
+                {loading ? '发送中…' : '发送登录链接'}
               </Button>
-            </>
-          ) : (
-            <>
-              <p className="text-sm text-muted-foreground text-center">
-                验证码已发到 <strong>{email}</strong>
-              </p>
-              {previewUrl ? (
-                <a
-                  href={previewUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="block text-xs text-center text-blue-600 underline"
-                >
-                  👉 在 Ethereal 查看邮件内容（点此打开新窗口）
-                </a>
-              ) : null}
-              {devCode ? (
-                <p className="text-xs text-center text-amber-700 bg-amber-50 p-2 rounded">
-                  Dev 模式：验证码是 <code className="font-mono font-bold">{devCode}</code>
-                </p>
-              ) : null}
-              <Input
-                type="text"
-                inputMode="numeric"
-                maxLength={6}
-                value={code}
-                onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
-                placeholder="123456"
-                aria-label="6 位验证码"
-                autoFocus
-                className="text-center text-2xl tracking-widest"
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && code.length === 6 && !loading) void verifyOtp();
-                }}
-              />
-              {error ? <p className="text-sm text-destructive">{error}</p> : null}
-              <Button
-                onClick={() => void verifyOtp()}
-                disabled={code.length !== 6 || loading}
-                className="w-full"
-              >
-                {loading ? '验证中…' : '登录'}
-              </Button>
-              <button
-                type="button"
-                onClick={() => {
-                  setStep('email');
-                  setCode('');
-                  setError(null);
-                }}
-                className="block w-full text-xs text-muted-foreground hover:text-foreground underline"
-              >
-                换个邮箱
-              </button>
             </>
           )}
 
