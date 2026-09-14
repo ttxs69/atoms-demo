@@ -19,7 +19,10 @@ if lsof -ti :3000 >/dev/null 2>&1; then
 fi
 echo "✓ 端口空闲"
 
-echo "── 2. 构建 + 启动 ──"
+echo "── 2. NEXT_PUBLIC 构建期变量一致性 ──"
+bash scripts/check-env-sync.sh
+
+echo "── 3. 构建 + 启动 ──"
 set -a; source .env; set +a
 npm run build >/dev/null 2>&1 || { echo "✗ build 失败"; npm run build; exit 1; }
 echo "✓ build"
