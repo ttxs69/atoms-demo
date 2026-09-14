@@ -7,7 +7,7 @@ cd "$(dirname "$0")/.."
 
 ENV_KEYS=$(grep -oE '^NEXT_PUBLIC_[A-Z_]+' .env 2>/dev/null | sort -u)
 # Dockerfile builder 阶段的 ENV KEY=VALUE，取第二个字段（KEY）
-DOCKER_KEYS=$(awk '/^FROM/{phase=$2} phase ~ /builder/ && /^ENV NEXT_PUBLIC_/{print $2}' Dockerfile | cut -d= -f1 | sort -u)
+DOCKER_KEYS=$(awk '/^FROM/{phase=$NF} phase=="builder" && /^ENV NEXT_PUBLIC_/{print $2}' Dockerfile | cut -d= -f1 | sort -u)
 
 missing=0
 while IFS= read -r key; do
