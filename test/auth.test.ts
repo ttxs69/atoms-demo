@@ -15,6 +15,7 @@ import { AllowAllCaptcha, TurnstileCaptcha } from '../src/auth/captcha.ts';
 test('generate rejects a request with no session — 401, nothing runs', async () => {
   // No SUPABASE_URL in the test env → DevVerifier → no header = no session.
   delete process.env['SUPABASE_URL'];
+  delete process.env['APPS_SUPABASE_URL'];
   const res = await generate(
     new Request('http://x/api/generate', {
       method: 'POST',
@@ -32,6 +33,8 @@ test('generate derives sessionId from the session, ignoring the body value', asy
   // PASSED and execution moved past identity.
   delete process.env['E2B_API_KEY'];
   delete process.env['SUPABASE_URL'];
+  delete process.env['APPS_SUPABASE_URL'];
+  delete process.env['APPS_SUPABASE_URL'];
   const res = await generate(
     new Request('http://x/api/generate', {
       method: 'POST',
@@ -48,6 +51,7 @@ test('generate derives sessionId from the session, ignoring the body value', asy
 test('DevVerifier is never active when SUPABASE_URL is configured', () => {
   process.env['SUPABASE_URL'] = 'https://example.supabase.co';
   process.env['SUPABASE_ANON_KEY'] = 'anon';
+  delete process.env['APPS_SUPABASE_URL'];
   const v = sessionVerifierFromEnv();
   assert.equal((v as { constructor: { name: string } }).constructor.name, 'SupabaseVerifier');
   delete process.env['SUPABASE_URL'];

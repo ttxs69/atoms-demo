@@ -134,6 +134,8 @@ test('DELETE /api/workspace enqueues all four targets for the session user', asy
      ON CONFLICT (idempotency_key) DO NOTHING`,
   );
   delete process.env['E2B_API_KEY'];
+  delete process.env['SUPABASE_URL'];
+  delete process.env['APPS_SUPABASE_URL'];
   const res = await deleteWorkspace(
     new Request('http://x/api/workspace', {
       method: 'DELETE',

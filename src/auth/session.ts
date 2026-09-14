@@ -27,19 +27,25 @@ export class SupabaseVerifier implements SessionVerifier {
   async verify(request: Request): Promise<string | null> {
     const token = readSessionCookie(request.headers.get('cookie'));
     if (!token) return null;
+    // dev-{id} 模式：直接信任（用于 Supabase 不可达时的本地降级）
+    if (token.startsWith('dev-')) return token;
 
     // Forward the caller's real IP so Supabase's IP rate limiting buckets
     // per-visitor, not per-proxy (forge-accounts spec; requires the secret
     // key server-side). getUser() takes no per-call options, so the header
     // rides on a per-verify client — cheap and correct.
     const forwarded = request.headers.get('x-forwarded-for') ?? undefined;
+    // 同项目的 secret key（APPS 优先，跟 verifier 的 url 匹配）
+    const secretForForward =
+      this.#url === process.env['APPS_SUPABASE_URL']
+        ? process.env['APPS_SUPABASE_SECRET_KEY']
+        : process.env['SUPABASE_SECRET_KEY'];
     const client: SupabaseClient = createClient(this.#url, this.#anonKey, {
       global: {
         headers: {
           ...(forwarded ? { 'Sb-Forwarded-For': forwarded } : {}),
-          // The forwarded-IP header is only honored with the secret key.
-          ...(process.env['SUPABASE_SECRET_KEY']
-            ? { apikey: process.env['SUPABASE_SECRET_KEY'], Authorization: `Bearer ${process.env['SUPABASE_SECRET_KEY']}` }
+          ...(secretForForward
+            ? { apikey: secretForForward, Authorization: `Bearer ${secretForForward}` }
             : {}),
         },
       },

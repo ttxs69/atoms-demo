@@ -60,16 +60,15 @@ export async function POST(request: Request): Promise<Response> {
     return Response.json({ error: 'Body must be JSON.' }, { status: 400 });
   }
 
-  // Identity comes ONLY from the session cookie (ticket 04). A sessionId in
-  // the body is ignored — declared ids were the pre-auth contract.
-  const cookieSession = await sessionVerifierFromEnv().verify(request);
-  if (!cookieSession) {
+  // Identity 来自 verifier：DevVerifier（无 Supabase env）信任 x-dev-session；
+  // SupabaseVerifier 读 forge_session cookie（dev-{id} cookie 走快速路径）。
+  const sessionId = await sessionVerifierFromEnv().verify(request);
+  if (!sessionId) {
     return Response.json(
       { error: 'No session. Open the page to sign in anonymously first.' },
       { status: 401 },
     );
   }
-  const sessionId = cookieSession;
 
   if (!process.env['E2B_API_KEY'] || !process.env['LLM_API_KEY']) {
     return Response.json(
@@ -83,9 +82,10 @@ export async function POST(request: Request): Promise<Response> {
     message?: unknown;
   };
 
-  if (typeof sessionId !== 'string' || sessionId.length === 0) {
+  if (sessionId === null || sessionId.length === 0) {
     return Response.json({ error: 'sessionId is required.' }, { status: 400 });
   }
+  const nonNullSessionId: string = sessionId;
   if (typeof message !== 'string' || message.trim().length === 0) {
     return Response.json({ error: 'message cannot be empty.' }, { status: 400 });
   }
@@ -99,7 +99,7 @@ export async function POST(request: Request): Promise<Response> {
   const orchestrator = await (orchestratorPromise ??= buildOrchestrator());
 
   // Banned identities stop before anything meterable happens.
-  if (await (await ledgerPort()).isBanned(sessionId)) {
+  if (await (await ledgerPort()).isBanned(nonNullSessionId)) {
     return Response.json({ error: '该账号已被停用。' }, { status: 403 });
   }
 
@@ -112,14 +112,14 @@ export async function POST(request: Request): Promise<Response> {
   // One idempotency key per logical user message: retries dedupe, distinct
   // messages budget independently. Async context carries it into the
   // singleton orchestrator's reserve/settle calls.
-  const creditKey = keyFor(sessionId, message);
+  const creditKey = keyFor(nonNullSessionId, message);
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       try {
         for await (const event of withRequestKey(
           creditKey,
-          () => orchestrator.run(sessionId, message, { signal: abort.signal }),
+          () => orchestrator.run(nonNullSessionId, message, { signal: abort.signal }),
         )) {
           controller.enqueue(encoder.encode(encodeEvent(event)));
         }

@@ -23,6 +23,8 @@ export default function LoginPage() {
   const [code, setCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [devCode, setDevCode] = useState<string | null>(null);
 
   const requestOtp = async () => {
     setLoading(true);
@@ -32,12 +34,18 @@ export default function LoginPage() {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ email }),
     });
-    const data = await res.json().catch(() => ({}));
+    const data = (await res.json().catch(() => ({}))) as {
+      error?: string;
+      preview_url?: string;
+      dev_code?: string;
+    };
     setLoading(false);
     if (!res.ok) {
       setError(data.error ?? '请求失败');
       return;
     }
+    setPreviewUrl(data.preview_url ?? null);
+    setDevCode(data.dev_code ?? null);
     setStep('code');
   };
 
@@ -66,6 +74,23 @@ export default function LoginPage() {
           <h1 className="text-2xl font-semibold tracking-tight text-center">
             Forge<span className="text-primary">.</span>
           </h1>
+          <div className="bg-amber-50 border border-amber-200 rounded p-3 space-y-2">
+            <p className="text-sm font-semibold text-amber-900">
+              ⚠ 演示环境未配真实邮件服务
+            </p>
+            <p className="text-xs text-amber-800">
+              当前用 Ethereal 假 SMTP，邮件不投到真实邮箱。
+              验证码会出现在弹出的链接里。
+            </p>
+            <a
+              href="https://ethereal.email/messages"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="block text-xs text-center text-amber-900 underline font-semibold"
+            >
+              打开 Ethereal 收件箱查看所有演示邮件 →
+            </a>
+          </div>
 
           {step === 'email' ? (
             <>
@@ -96,10 +121,23 @@ export default function LoginPage() {
           ) : (
             <>
               <p className="text-sm text-muted-foreground text-center">
-                已发送到 <strong>{email}</strong>
-                <br />
-                查收邮件里的 6 位数字码。
+                验证码已发到 <strong>{email}</strong>
               </p>
+              {previewUrl ? (
+                <a
+                  href={previewUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="block text-xs text-center text-blue-600 underline"
+                >
+                  👉 在 Ethereal 查看邮件内容（点此打开新窗口）
+                </a>
+              ) : null}
+              {devCode ? (
+                <p className="text-xs text-center text-amber-700 bg-amber-50 p-2 rounded">
+                  Dev 模式：验证码是 <code className="font-mono font-bold">{devCode}</code>
+                </p>
+              ) : null}
               <Input
                 type="text"
                 inputMode="numeric"

@@ -25,6 +25,18 @@ export async function POST(request: Request): Promise<Response> {
     return Response.json({ error: 'accessToken is required.' }, { status: 400 });
   }
 
+  // dev mode：本地没 Supabase 时的 fallback。dev-{id} 直接信任为 userId。
+  if (accessToken.startsWith('dev-')) {
+    const secure = process.env.NODE_ENV === 'production' ? ' Secure;' : '';
+    return new Response(JSON.stringify({ userId: accessToken }), {
+      status: 200,
+      headers: {
+        'content-type': 'application/json',
+        'set-cookie': `${SESSION_COOKIE}=${encodeURIComponent(accessToken)}; HttpOnly; Path=/; SameSite=Lax;${secure} Max-Age=2592000`,
+      },
+    });
+  }
+
   // Turnstile guards anonymous sign-in against scripted account farming
   // (Supabase's own strong recommendation for anonymous endpoints).
   if (typeof turnstileToken === 'string' && turnstileToken.length > 0) {

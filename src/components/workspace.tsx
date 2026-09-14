@@ -328,31 +328,20 @@ export function Workspace() {
           sessionIdRef.current = data.user.id;
           setIdentity(data.user.id);
           setUserEmail(data.user.email);
+          return; // 已登录，不走 anonymous 流程
         }
       } catch {
         /* not logged in, continue anonymous */
       }
-    })();
 
-    let cancelled = false;
-    const timeoutId = setTimeout(() => {
-      if (cancelled || sessionIdRef.current) return;
-      // Timeout: Supabase didn't respond in time → dev fallback
-      let devId = localStorage.getItem('forge-dev-session');
-      if (!devId) {
-        devId = `dev-${Math.random().toString(36).slice(2, 8)}`;
-        localStorage.setItem('forge-dev-session', devId);
-      }
-      sessionIdRef.current = devId;
-      setIdentity(devId);
-    }, 4000);
-    void (async () => {
+      // Anonymous 登录流程
       try {
         const { createClient } = await import('@supabase/supabase-js');
         // 匿名登录也走 APPS（auth + projects 同源）
         const url = process.env['NEXT_PUBLIC_APPS_SUPABASE_URL'];
         const anonKey = process.env['NEXT_PUBLIC_APPS_SUPABASE_PUBLISHABLE_KEY'];
         if (!url || !anonKey) {
+          // env 没设——dev fallback
           let devId = localStorage.getItem('forge-dev-session');
           if (!devId) {
             devId = `dev-${Math.random().toString(36).slice(2, 8)}`;
@@ -360,6 +349,11 @@ export function Workspace() {
           }
           sessionIdRef.current = devId;
           setIdentity(devId);
+          await fetch('/api/auth/session', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ accessToken: devId }),
+          }).catch(() => {});
           return;
         }
         const supabase = createClient(url, anonKey);
@@ -379,6 +373,9 @@ export function Workspace() {
                 ...(tsToken ? { turnstileToken: tsToken } : {}),
               }),
             });
+          } else {
+            // signInAnonymously 失败 → dev fallback
+            throw new Error('signInAnonymously no session');
           }
           return;
         }
@@ -392,7 +389,7 @@ export function Workspace() {
           sessionIdRef.current = session.user.id;
           const id = session.user.id;
           setIdentity(id);
-
+          // 恢复 preview
           try {
             const res = await fetch('/api/preview');
             if (res.ok) {
@@ -420,8 +417,7 @@ export function Workspace() {
           }
         }
       } catch {
-        // Supabase failed (network down, aborted, project missing).
-        // Fall back to dev mode so the UI works instead of hanging on "连接中".
+        // Supabase failed → dev fallback
         let devId = localStorage.getItem('forge-dev-session');
         if (!devId) {
           devId = `dev-${Math.random().toString(36).slice(2, 8)}`;
@@ -429,9 +425,11 @@ export function Workspace() {
         }
         sessionIdRef.current = devId;
         setIdentity(devId);
-      } finally {
-        clearTimeout(timeoutId);
-        cancelled = true;
+        await fetch('/api/auth/session', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ accessToken: devId }),
+        }).catch(() => {});
       }
     })();
   }, []);
