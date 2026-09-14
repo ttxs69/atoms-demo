@@ -1,23 +1,14 @@
 import 'server-only';
 import { NextResponse } from 'next/server';
-import { platformSupabase } from '@/lib/supabase.ts';
-import { appsSupabase } from '@/lib/supabase.ts';
+import { appsSupabase, platformSupabase, readAccessToken } from '@/lib/supabase.ts';
 
 export const runtime = 'nodejs';
 
 /** 从 cookie 拿 user_id */
 async function getUserId(request: Request): Promise<string | null> {
-  const cookie = request.headers.get('cookie') ?? '';
-  const match = cookie.match(/forge_session=([^;]+)/);
-  if (!match || !match[1]) return null;
-  let parsed: { access_token?: string };
-  try {
-    parsed = JSON.parse(decodeURIComponent(match[1]));
-  } catch {
-    return null;
-  }
-  if (!parsed.access_token) return null;
-  const { data } = await platformSupabase().auth.getUser(parsed.access_token);
+  const accessToken = readAccessToken(request);
+  if (!accessToken) return null;
+  const { data } = await platformSupabase().auth.getUser(accessToken);
   return data.user?.id ?? null;
 }
 

@@ -1,21 +1,14 @@
 import 'server-only';
 import { NextResponse } from 'next/server';
-import { platformSupabase, appsSupabase } from '@/lib/supabase.ts';
+import { platformSupabase, appsSupabase, readAccessToken } from '@/lib/supabase.ts';
 
 export const runtime = 'nodejs';
 
 async function getUserId(request: Request): Promise<string | null> {
-  const cookie = request.headers.get('cookie') ?? '';
-  const match = cookie.match(/forge_session=([^;]+)/);
-  if (!match || !match[1]) return null;
-  try {
-    const parsed = JSON.parse(decodeURIComponent(match[1])) as { access_token?: string };
-    if (!parsed.access_token) return null;
-    const { data } = await platformSupabase().auth.getUser(parsed.access_token);
-    return data.user?.id ?? null;
-  } catch {
-    return null;
-  }
+  const accessToken = readAccessToken(request);
+  if (!accessToken) return null;
+  const { data } = await platformSupabase().auth.getUser(accessToken);
+  return data.user?.id ?? null;
 }
 
 /** GET /api/projects/:id —— 详情 + 文件列表 */
