@@ -16,6 +16,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { AGENT_NAMES, AGENT_ROLE_LABELS, type AgentHandle } from '../domain/roles.ts';
 import type { StreamEvent } from '../domain/events.ts';
+import type { JournalRecord } from '../journal/fold.ts';
 import { decodeEvents } from '../transport/sse.ts';
 
 /** One file in the workspace tree: planned (gray), writing, or done. */
@@ -100,6 +101,33 @@ function progressText(files: FileEntry[]): string {
   const writing =
     writingIndex === -1 ? '' : ` · 正在写第 ${writingIndex + 1} 个`;
   return `${files.length} 个文件 · 已完成 ${done}${writing}`;
+}
+
+/** Folded journal records → the same Message list the live stream builds. */
+function recordsToMessages(records: JournalRecord[]): Message[] {
+  const out: Message[] = [];
+  records.forEach((record, i) => {
+    if (record.kind === 'user_message') {
+      out.push({ kind: 'user', messageId: record.messageId ?? `ru-${i}`, text: record.text });
+    } else if (record.kind === 'agent_message') {
+      out.push({
+        kind: 'agent',
+        messageId: record.messageId ?? `ra-${i}`,
+        agentHandle: record.agentHandle as AgentHandle,
+        text: record.text,
+        files: record.files.map((f, j) => ({
+          toolCallId: `r-${i}-${j}`,
+          path: f.path,
+          bytes: f.bytes,
+          state: 'done' as const,
+        })),
+        steps: [], // transient by contract — steps do not replay
+        errors: record.errors,
+        finished: !record.aborted,
+      });
+    }
+  });
+  return out;
 }
 
 export function Workspace() {
@@ -319,6 +347,37 @@ export function Workspace() {
   // to dev mode — if Supabase is down or unreachable, users still see a
   // working app instead of hanging on "连接中".
   useEffect(() => {
+    // Preview/workspace restore runs for EVERY resolved real identity —
+    // returning logged-in users (via /api/auth/me) get their preview back
+    // exactly like anonymous users with an existing session do.
+    const restoreWorkspace = async (): Promise<void> => {
+      try {
+        const res = await fetch('/api/preview');
+        if (res.ok) {
+          const data = (await res.json()) as { url?: string; files?: string[] };
+          if (data.url) {
+            setPreviewUrl(data.url);
+            setPreviewNonce((n) => n + 1);
+            setPreviewOpen(true);
+            if (data.files && data.files.length > 0) {
+              setPlanFiles(
+                data.files
+                  .filter((f) => f.startsWith('src/'))
+                  .map((path, i) => ({
+                    toolCallId: `restored-${i}`,
+                    path,
+                    bytes: null,
+                    state: 'done' as const,
+                  })),
+              );
+            }
+          }
+        }
+      } catch {
+        /* first visit or nothing generated — fine */
+      }
+    };
+
     // First: check if logged-in user exists (cookie-based)
     void (async () => {
       try {
@@ -328,6 +387,7 @@ export function Workspace() {
           sessionIdRef.current = data.user.id;
           setIdentity(data.user.id);
           setUserEmail(data.user.email);
+          await restoreWorkspace(); // 回归用户同样找回 workspace
           return; // 已登录，不走 anonymous 流程
         }
       } catch {
@@ -390,31 +450,7 @@ export function Workspace() {
           const id = session.user.id;
           setIdentity(id);
           // 恢复 preview
-          try {
-            const res = await fetch('/api/preview');
-            if (res.ok) {
-              const data2 = (await res.json()) as { url?: string; files?: string[] };
-              if (data2.url) {
-                setPreviewUrl(data2.url);
-                setPreviewNonce((n) => n + 1);
-                setPreviewOpen(true);
-                if (data2.files && data2.files.length > 0) {
-                  setPlanFiles(
-                    data2.files
-                      .filter((f) => f.startsWith('src/'))
-                      .map((path, i) => ({
-                        toolCallId: `restored-${i}`,
-                        path,
-                        bytes: null,
-                        state: 'done' as const,
-                      })),
-                  );
-                }
-              }
-            }
-          } catch {
-            /* first visit or nothing generated — fine */
-          }
+          await restoreWorkspace();
         }
       } catch {
         // Supabase failed → dev fallback
@@ -434,6 +470,29 @@ export function Workspace() {
     })();
   }, []);
 
+
+  // Hydration (docs/04 §3.2): a real identity owns a projects row — replay
+  // the conversation so a refresh starts where the user left off. Dev
+  // sessions have nothing persisted, by design.
+  useEffect(() => {
+    if (!identity || identity.startsWith('dev-')) return;
+    void (async () => {
+      try {
+        const res = await fetch('/api/projects');
+        if (!res.ok) return;
+        const { projects } = (await res.json()) as { projects?: { id: string }[] };
+        const active = projects?.[0];
+        if (!active) return; // never generated — nothing to replay
+        const ev = await fetch(`/api/projects/${active.id}/events`);
+        if (!ev.ok) return;
+        const { events } = (await ev.json()) as { events?: { payload: JournalRecord }[] };
+        const messages = (events ?? []).map((row) => row.payload);
+        if (messages.length > 0) setMessages(recordsToMessages(messages));
+      } catch {
+        /* first visit or persistence unavailable — live stream still works */
+      }
+    })();
+  }, [identity]);
 
   const signOut = useCallback(async () => {
     await fetch('/api/auth/signout', { method: 'POST' });
@@ -683,7 +742,17 @@ export function Workspace() {
             />
             <div className="flex items-center gap-2">
               {streaming ? (
-                <Button variant="destructive" onClick={() => abortRef.current?.abort()}>
+                <Button
+                  variant="destructive"
+                  onClick={() => {
+                    // Optimistic: the server's `interrupted` event is emitted
+                    // AFTER this abort reaches it — by then the aborted fetch
+                    // no longer delivers events, so the banner must be set
+                    // here, not via applyEvent (J4 regression).
+                    setStopped(true);
+                    abortRef.current?.abort();
+                  }}
+                >
                   ■ 停止
                 </Button>
               ) : (

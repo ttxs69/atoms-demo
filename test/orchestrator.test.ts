@@ -233,3 +233,63 @@ test('FakeModel throws when no scripted turn remains', async () => {
     /no scripted turn left/,
   );
 });
+
+test('a missing sandbox cold-restores from the snapshot (docs/04 §3.3)', async () => {
+  const sandbox = new FakeSandbox();
+  const snapshotFiles = new Map([
+    ['package.json', '{}'],
+    ['src/App.tsx', 'export default function App() {}'],
+  ]);
+  const orchestrator = createOrchestrator({
+    sandbox,
+    model: new FakeModel({
+      eng: [[{ type: 'text', delta: 'Done.' }]],
+    }),
+    credits: new FakeCredits(),
+    snapshot: {
+      save: async () => 0,
+      load: async (id) => (id === 'session-1' ? snapshotFiles : null),
+    },
+  });
+
+  const events = await collect(orchestrator.run('session-1', '换个颜色'));
+
+  const created = [...sandbox.files.keys()][0]!;
+  assert.equal(
+    sandbox.files.get(created)?.get('src/App.tsx'),
+    'export default function App() {}',
+  );
+  // Restored App.tsx means not a first turn: Emma does not re-plan.
+  assert.equal(
+    events.some((e) => e.type === 'agent_started' && e.agentHandle === 'pm'),
+    false,
+  );
+});
+
+test('a snapshot miss (load → null) degrades to a fresh first turn', async () => {
+  const sandbox = new FakeSandbox();
+  const orchestrator = createOrchestrator({
+    sandbox,
+    model: new FakeModel({
+      pm: planTurn(['a.txt']),
+      eng: [
+        [
+          { type: 'tool_call_start', toolCallId: 't1', toolName: 'write_file' },
+          { type: 'tool_input_delta', toolCallId: 't1', argsDelta: '{"path":"a.txt","content":"x"}' },
+          { type: 'tool_call_end', toolCallId: 't1' },
+        ],
+        [{ type: 'text', delta: 'Done.' }],
+      ],
+    }),
+    credits: new FakeCredits(),
+    snapshot: { save: async () => 0, load: async () => null },
+  });
+
+  const events = await collect(orchestrator.run('session-1', 'make something'));
+
+  // No snapshot → first-turn semantics: Emma plans.
+  assert.equal(
+    events.some((e) => e.type === 'agent_started' && e.agentHandle === 'pm'),
+    true,
+  );
+});

@@ -19,7 +19,11 @@ export default defineConfig({
     reuseExistingServer: true,
     timeout: 15_000_000,
   },
-  workers: 4,
+  // Real-LLM / real-E2B tests do not parallelize safely: concurrent
+  // generations hit provider rate limits and an adapter error kills the
+  // turn instantly (observed: 45ms streams). The suite is a manually-run
+  // acceptance suite — determinism beats speed.
+  workers: 1,
   projects: [
     { name: 'chromium', use: { browserName: 'chromium' } },
   ],

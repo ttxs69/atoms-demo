@@ -9,11 +9,12 @@ import type { SqlClient } from '../credits/ledger.ts';
  * sandbox → shared-project rows → platform rows → auth user LAST.
  */
 
-export type GcTarget = 'sandbox' | 'supabase_rows' | 'forge_rows' | 'auth_user';
+export type GcTarget = 'sandbox' | 'storage_objects' | 'supabase_rows' | 'forge_rows' | 'auth_user';
 
 /** Deletion order is the dependency order (spec: never varied). */
 export const GC_ORDER: readonly GcTarget[] = [
   'sandbox',
+  'storage_objects',
   'supabase_rows',
   'forge_rows',
   'auth_user',
@@ -21,6 +22,8 @@ export const GC_ORDER: readonly GcTarget[] = [
 
 export interface Deleters {
   killSandbox(workspaceId: string): Promise<void>;
+  /** The artifact snapshot in object storage (docs/04 §3.4). */
+  deleteSnapshot(workspaceId: string): Promise<void>;
   deleteSharedRows(workspaceId: string): Promise<void>;
   deleteForgeRows(workspaceId: string): Promise<void>;
   deleteAuthUser(workspaceId: string): Promise<void>;
@@ -165,6 +168,8 @@ function runDeleter(deleters: Deleters, target: GcTarget, workspaceId: string): 
   switch (target) {
     case 'sandbox':
       return deleters.killSandbox(workspaceId);
+    case 'storage_objects':
+      return deleters.deleteSnapshot(workspaceId);
     case 'supabase_rows':
       return deleters.deleteSharedRows(workspaceId);
     case 'forge_rows':

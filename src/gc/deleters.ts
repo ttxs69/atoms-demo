@@ -35,6 +35,22 @@ export function productionDeleters(keys: DeleterKeys): Deleters {
       }
     },
 
+    // The snapshot object lives on the same Supabase project as auth;
+    // keys are the platform pair (single-project deployment, lib/supabase.ts).
+    async deleteSnapshot(workspaceId) {
+      if (!keys.platformSupabaseUrl || !keys.platformServiceKey) return;
+      await fetch(
+        `${keys.platformSupabaseUrl}/storage/v1/object/project-snapshots/${workspaceId}.json`,
+        {
+          method: 'DELETE',
+          headers: {
+            apikey: keys.platformServiceKey,
+            Authorization: `Bearer ${keys.platformServiceKey}`,
+          },
+        },
+      );
+    },
+
     async deleteSharedRows(workspaceId) {
       if (!keys.sharedDbUrl) return;
       const { Client } = await import('pg');

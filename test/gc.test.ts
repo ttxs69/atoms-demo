@@ -45,6 +45,7 @@ test('sweep executes in dependency order and marks done', async () => {
   const calls: string[] = [];
   const deleters: Deleters = {
     killSandbox: async (w) => void calls.push(`sandbox:${w}`),
+    deleteSnapshot: async (w) => void calls.push(`snapshot:${w}`),
     deleteSharedRows: async (w) => void calls.push(`shared:${w}`),
     deleteForgeRows: async (w) => void calls.push(`forge:${w}`),
     deleteAuthUser: async (w) => void calls.push(`auth:${w}`),
@@ -52,10 +53,10 @@ test('sweep executes in dependency order and marks done', async () => {
 
   const report = await sweep(db, deleters);
 
-  assert.deepEqual(calls, ['sandbox:u1', 'shared:u1', 'forge:u1', 'auth:u1']);
-  assert.equal(report.executed, 4);
+  assert.deepEqual(calls, ['sandbox:u1', 'snapshot:u1', 'shared:u1', 'forge:u1', 'auth:u1']);
+  assert.equal(report.executed, 5);
   const done = await db.query(`SELECT COUNT(*) AS n FROM deletion_queue WHERE state = 'done'`);
-  assert.equal(Number(done.rows[0]!.n), 4);
+  assert.equal(Number(done.rows[0]!.n), 5);
 });
 
 test('enqueue is idempotent; done rows never re-execute', async () => {
@@ -73,6 +74,7 @@ test('enqueue is idempotent; done rows never re-execute', async () => {
   let called = 0;
   const deleters: Deleters = {
     killSandbox: async () => void called++,
+    deleteSnapshot: async () => void called++,
     deleteSharedRows: async () => void called++,
     deleteForgeRows: async () => void called++,
     deleteAuthUser: async () => void called++,
@@ -94,6 +96,7 @@ test('failures back off, retry when due, and flip to failed after 5 strikes', as
       failures += 1;
       if (failures <= 5) throw new Error('sandbox api down');
     },
+    deleteSnapshot: async () => {},
     deleteSharedRows: async () => {},
     deleteForgeRows: async () => {},
     deleteAuthUser: async () => {},
@@ -148,7 +151,7 @@ test('DELETE /api/workspace enqueues all four targets for the session user', asy
   );
   assert.deepEqual(
     rows.rows.map((r) => r.target),
-    ['sandbox', 'supabase_rows', 'forge_rows', 'auth_user'],
+    ['sandbox', 'storage_objects', 'supabase_rows', 'forge_rows', 'auth_user'],
   );
   // Degraded deleters are no-ops → everything completed.
   assert.ok(rows.rows.every((r) => r.state === 'done'));

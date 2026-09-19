@@ -9,6 +9,7 @@ import type {
   ToolResultPart,
 } from '../ports/model-port.ts';
 import type { SandboxPort } from '../ports/sandbox-port.ts';
+import type { SnapshotPort } from '../ports/supabase-snapshot.ts';
 import { SCAFFOLD_FILES } from './scaffold.ts';
 import { injectRlsTemplate } from '../backend/rls-template.ts';
 
@@ -40,6 +41,8 @@ export interface OrchestratorDeps {
   model: ModelPort;
   credits: CreditsPort;
   gate?: GatePort;
+  /** Artifact checkpoint for cold restore (docs/04 §3.3). Optional. */
+  snapshot?: SnapshotPort;
 }
 
 export interface Orchestrator {
@@ -178,6 +181,21 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     // Session and workspace are 1:1 in the MVP, so the session id doubles as
     // the workspace id the sandbox is tagged with.
     const created = await deps.sandbox.create(sessionId);
+
+    // Cold restore (docs/04 §3.3): no sandbox in memory, none in E2B — the
+    // snapshot is the surviving copy of the artifacts. Failure degrades to
+    // a fresh first turn; the manifest is rebuilt so the next iterate turn
+    // sees current code instead of a blank slate.
+    if (deps.snapshot) {
+      const files = await deps.snapshot.load(sessionId).catch(() => null);
+      if (files && files.size > 0) {
+        for (const [path, content] of files) {
+          await deps.sandbox.writeFile(created, path, content);
+        }
+        sessionPaths.set(sessionId, new Set(files.keys()));
+      }
+    }
+
     sandboxBySession.set(sessionId, created);
     return created;
   }
@@ -465,7 +483,28 @@ function parsePlanArgs(raw: string): Plan {
       }
 
       const host = await deps.sandbox.getPreviewHost(sandboxId, 3000);
-      yield { type: 'run_step', step: 'preview_ready', url: `https://${host}` };
+
+      // Checkpoint while HOT — before this generator's finally pauses the
+      // sandbox. The route-side post-stream save raced that pause and hung
+      // on E2B's pause transition; saving inside the pipeline eliminates
+      // the race by construction (docs/04 §3.3). preview_ready thus means
+      // "checkpointed and ready"; a failed checkpoint degrades to a normal
+      // preview (undefined snapshotFiles) and the next turn re-checkpoints.
+      let snapshotFiles: number | undefined;
+      if (deps.snapshot) {
+        try {
+          snapshotFiles = await deps.snapshot.save(sessionId);
+        } catch (error) {
+          console.error('snapshot save failed:', error);
+        }
+      }
+
+      yield {
+        type: 'run_step',
+        step: 'preview_ready',
+        url: `https://${host}`,
+        ...(snapshotFiles !== undefined ? { snapshotFiles } : {}),
+      };
     } finally {
       await deps.sandbox.pause(sandboxId);
     }

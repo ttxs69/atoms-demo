@@ -118,6 +118,18 @@ Postgres 里的一张表，GC 的持久化工作队列。
 
 ---
 
+## 持久化
+
+### 事件日志（journal）
+`project_events` 表里按回合折叠好的对话记录，一条消息一行，`seq` 为重放游标。
+- **不是**原始事件流：`text_delta` 是线上编码，落库前已在服务端折叠成完整消息（docs/04 §3.2）。
+- 为什么存在：刷新后重建对话的唯一真相；transient 事件按契约不落库。
+
+### 快照（snapshot）
+成功回合后写入 `project-snapshots` 桶的 `{ path → content }` JSON，按 **workspace id** 命名，latest-wins。
+- **不是** zip 导出（那是给用户的下载物），也不是逐文件 `project_files` 行（表在但不用）。
+- 为什么存在：沙箱死亡后的冷恢复真相；键与 deletion_queue 一致，GC 按行删对象（docs/04 §3.3）。
+
 ## 部署层
 
 ### 长驻单机（long-running single host）

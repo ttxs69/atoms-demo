@@ -72,7 +72,16 @@ export class E2BSandboxAdapter implements SandboxPort {
     const out: string[] = [];
     for (const entry of entries) {
       if (entry.type === 'dir') {
-        if (entry.name === 'node_modules' || entry.name === '.git') continue;
+        // Dot-dirs (.npm cache with thousands of entries, .git, .cache) and
+        // build output never belong in a walk — descending into .npm from
+        // the root effectively hangs (one files.list per cache directory).
+        // Mirrors the export route's EXCLUDED_DIRS semantics.
+        if (
+          entry.name === 'node_modules' ||
+          entry.name === 'dist' ||
+          entry.name.startsWith('.')
+        )
+          continue;
         const nested = await this.listFiles(sandboxId, `${dir}/${entry.name}`.replace('//', '/'));
         out.push(...nested);
       } else {

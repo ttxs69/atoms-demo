@@ -3,6 +3,7 @@ import { appsSupabase } from '@/lib/supabase.ts';
 import { randomInt } from 'crypto';
 import nodemailer from 'nodemailer';
 import type { Transporter } from 'nodemailer';
+import { OTP_TTL_MS, normalizeEmail } from '@/auth/otp.ts';
 
 export const runtime = 'nodejs';
 
@@ -23,9 +24,10 @@ async function getTransporter() {
     pass: testAccount.pass,
     web: 'https://ethereal.email/messages',
   };
-  return { transporter, account: etherealAccount };
+  return { transporter, account: etherealAccount! };
 }
 
+/** Imperative shell: validation in otp.ts core, effects here. */
 export async function POST(request: Request) {
   let body: { email?: string };
   try {
@@ -33,14 +35,14 @@ export async function POST(request: Request) {
   } catch {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
   }
-  const email = body.email?.trim().toLowerCase();
-  if (!email || !email.includes('@')) {
+  const email = normalizeEmail(body.email);
+  if (!email) {
     return NextResponse.json({ error: '邮箱格式不对' }, { status: 400 });
   }
 
   // 1. 自己生成 6 位 OTP
   const code = String(randomInt(100000, 999999));
-  const expiresAt = new Date(Date.now() + 10 * 60_000).toISOString();
+  const expiresAt = new Date(Date.now() + OTP_TTL_MS).toISOString();
 
   // 2. 存到 APPS_DB
   const { error: dbErr } = await appsSupabase()

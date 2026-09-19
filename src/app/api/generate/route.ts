@@ -2,6 +2,12 @@ import { createOrchestrator } from '../../../orchestrator/orchestrator.ts';
 import { E2BSandboxAdapter } from '../../../ports/e2b-sandbox-adapter.ts';
 import { createModelAdapter } from '../../../ports/llm-model-adapter.ts';
 import { encodeEvent } from '../../../transport/sse.ts';
+import type { StreamEvent } from '../../../domain/events.ts';
+import { foldTurn } from '../../../journal/fold.ts';
+import { supabaseJournal } from '../../../journal/supabase-journal.ts';
+import type { JournalPort } from '../../../ports/journal-port.ts';
+import { supabaseSnapshot } from '../../../ports/supabase-snapshot.ts';
+import { appsSupabase } from '../../../lib/supabase.ts';
 import { keyFor, ledgerPort, requestScopedCredits, withRequestKey } from '../../../credits/route-credits.ts';
 import { sessionVerifierFromEnv } from '../../../auth/session.ts';
 import { SharedProjectGate } from '../../../backend/supabase-gate.ts';
@@ -34,9 +40,10 @@ async function buildGate() {
 }
 
 function buildOrchestrator() {
-  return Promise.all([ledgerPort(), buildGate()]).then(([ledger, gate]) =>
-    createOrchestrator({
-      sandbox: new E2BSandboxAdapter(process.env['E2B_API_KEY'] ?? ''),
+  return Promise.all([ledgerPort(), buildGate()]).then(([ledger, gate]) => {
+    const sandbox = new E2BSandboxAdapter(process.env['E2B_API_KEY'] ?? '');
+    return createOrchestrator({
+      sandbox,
       model: createModelAdapter({
         protocol: process.env['LLM_PROTOCOL'] === 'anthropic' ? 'anthropic' : 'openai',
         baseUrl: process.env['LLM_BASE_URL'] ?? 'https://api.deepseek.com/v1',
@@ -48,8 +55,48 @@ function buildOrchestrator() {
       // credits stay per-request.
       credits: requestScopedCredits(ledger),
       ...(gate ? { gate } : {}),
-    }),
-  );
+      // Cold restore (docs/04 §3.3): no sandbox anywhere → snapshot is truth.
+      ...(appsConfigured() ? { snapshot: supabaseSnapshot(appsSupabase(), sandbox) } : {}),
+    });
+  });
+}
+
+function appsConfigured(): boolean {
+  return Boolean(process.env['APPS_SUPABASE_URL'] && process.env['APPS_SUPABASE_SECRET_KEY']);
+}
+
+/** Persistence is wired only when the apps project is configured. */
+function journalFromEnv(): JournalPort | null {
+  return appsConfigured() ? supabaseJournal(appsSupabase()) : null;
+}
+
+/**
+ * MVP: session ↔ project is 1:1 — the user's most recently opened project,
+ * created on first generation. Named from the first message so the projects
+ * list reads meaningfully without a separate naming step.
+ */
+async function resolveProject(
+  userId: string,
+  firstMessage: string,
+): Promise<string | null> {
+  const db = appsSupabase();
+  const { data } = await db
+    .from('projects')
+    .select('id')
+    .eq('user_id', userId)
+    .neq('status', 'archived')
+    .order('last_opened_at', { ascending: false, nullsFirst: false })
+    .limit(1);
+  if (data && data[0]) return data[0].id as string;
+
+  const name = firstMessage.trim().slice(0, 24) || '未命名项目';
+  const { data: created, error } = await db
+    .from('projects')
+    .insert({ user_id: userId, name, status: 'generating' })
+    .select('id')
+    .single();
+  if (error || !created) return null;
+  return created.id as string;
 }
 
 export async function POST(request: Request): Promise<Response> {
@@ -114,6 +161,28 @@ export async function POST(request: Request): Promise<Response> {
   // singleton orchestrator's reserve/settle calls.
   const creditKey = keyFor(nonNullSessionId, message);
 
+  // Persistence (docs/04): only real Supabase identities have a projects
+  // row — dev sessions keep the pre-persistence behavior untouched.
+  const journal = sessionId.startsWith('dev-') ? null : journalFromEnv();
+  let projectId: string | null = null;
+  if (journal) {
+    projectId = await resolveProject(nonNullSessionId, message);
+    if (!projectId) {
+      return Response.json({ error: 'Could not resolve project.' }, { status: 500 });
+    }
+    void appsSupabase()
+      .from('projects')
+      .update({ status: 'generating', updated_at: new Date().toISOString() })
+      .eq('id', projectId);
+  }
+
+  // The turn's events, folded and appended once the stream ends. Buffering
+  // the whole turn (not write-through per event) is deliberate: a crash
+  // mid-turn loses exactly that turn — the WAL/checkpoint fault table.
+  const turnEvents: StreamEvent[] = [];
+  let previewReady = false;
+  let snapshotFiles = 0;
+
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       try {
@@ -121,19 +190,45 @@ export async function POST(request: Request): Promise<Response> {
           creditKey,
           () => orchestrator.run(nonNullSessionId, message, { signal: abort.signal }),
         )) {
+          turnEvents.push(event);
+          if (event.type === 'run_step' && event.step === 'preview_ready') {
+            previewReady = true;
+            snapshotFiles = event.snapshotFiles ?? 0;
+          }
           controller.enqueue(encoder.encode(encodeEvent(event)));
         }
       } catch (error) {
-        controller.enqueue(
-          encoder.encode(
-            encodeEvent({
-              type: 'error',
-              agentHandle: 'eng',
-              message: error instanceof Error ? error.message : String(error),
-            }),
-          ),
-        );
+        const failure: StreamEvent = {
+          type: 'error',
+          agentHandle: 'eng',
+          message: error instanceof Error ? error.message : String(error),
+        };
+        turnEvents.push(failure);
+        controller.enqueue(encoder.encode(encodeEvent(failure)));
       } finally {
+        if (projectId && journal) {
+          try {
+            await journal.appendTurn(projectId, creditKey, foldTurn(message, turnEvents));
+          } catch (error) {
+            console.error('journal append failed:', error);
+          }
+          if (previewReady) {
+            // The checkpoint itself ran inside the pipeline (hot, pre-pause).
+            // Here only the projects row flips to ready — fire-and-forget,
+            // errors logged: the row is display metadata, not durability.
+            void appsSupabase()
+              .from('projects')
+              .update({
+                status: 'ready',
+                file_count: snapshotFiles,
+                updated_at: new Date().toISOString(),
+              })
+              .eq('id', projectId)
+              .then(({ error }) => {
+                if (error) console.error('projects update failed:', error.message);
+              });
+          }
+        }
         controller.close();
       }
     },

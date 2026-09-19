@@ -62,6 +62,9 @@ export type TransientEvent =
       step: 'installing' | 'migrating' | 'building' | 'starting' | 'preview_ready' | 'autofixing';
       /** Present on preview_ready: the URL the preview iframe should load. */
       url?: string;
+      /** Present on preview_ready: files committed to the artifact snapshot
+       * this turn (the checkpoint runs hot, before the turn-end pause). */
+      snapshotFiles?: number;
       /** Present on autofixing: which repair round this is. */
       attempt?: number;
       /** Present on autofixing: the raw build error, for the folded detail view. */

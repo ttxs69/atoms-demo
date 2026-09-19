@@ -2,9 +2,11 @@ import { NextResponse } from 'next/server';
 import { appsSupabase } from '@/lib/supabase.ts';
 import { createClient } from '@supabase/supabase-js';
 import type { Session, User } from '@supabase/supabase-js';
+import { checkOtp, normalizeEmail, parseCode, sessionCookie } from '@/auth/otp.ts';
 
 export const runtime = 'nodejs';
 
+/** Imperative shell: the verify decision lives in checkOtp (pure, unit-locked). */
 export async function POST(request: Request) {
   let body: { email?: string; code?: string };
   try {
@@ -12,12 +14,12 @@ export async function POST(request: Request) {
   } catch {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
   }
-  const email = body.email?.trim().toLowerCase();
-  const code = body.code?.trim();
-  if (!email || !email.includes('@')) {
+  const email = normalizeEmail(body.email);
+  const code = parseCode(body.code);
+  if (!email) {
     return NextResponse.json({ error: '邮箱格式不对' }, { status: 400 });
   }
-  if (!code || !/^\d{6}$/.test(code)) {
+  if (!code) {
     return NextResponse.json({ error: '请输入 6 位数字码' }, { status: 400 });
   }
 
@@ -31,16 +33,18 @@ export async function POST(request: Request) {
   if (dbErr || !row) {
     return NextResponse.json({ error: '验证码不存在，请重新发送' }, { status: 401 });
   }
-  if (new Date(row.expires_at) < new Date()) {
+
+  const check = checkOtp(row, code, new Date());
+  if (check.verdict === 'expired') {
     return NextResponse.json({ error: '验证码已过期，请重新发送' }, { status: 401 });
   }
-  if (row.attempts >= 5) {
+  if (check.verdict === 'too_many_attempts') {
     return NextResponse.json({ error: '尝试次数过多，请重新发送' }, { status: 429 });
   }
-  if (row.code !== code) {
+  if (check.verdict === 'bad_code') {
     await appsSupabase()
       .from('otp_codes')
-      .update({ attempts: row.attempts + 1 })
+      .update({ attempts: check.nextAttempts })
       .eq('email', email);
     return NextResponse.json({ error: '验证码错误' }, { status: 401 });
   }
@@ -49,8 +53,8 @@ export async function POST(request: Request) {
   const platformAdmin = createClient(
     process.env['APPS_SUPABASE_URL']!,
     process.env['APPS_SUPABASE_SECRET_KEY']!,
-    { auth: { persistSession: false, autoRefreshToken: false } },
-  );
+    { auth: { persistSession: false, autoRefreshToken: false },
+  });
 
   const { data: usersList } = await platformAdmin.auth.admin.listUsers();
   let user: User | undefined = usersList?.users.find((u) => u.email === email);
@@ -96,21 +100,16 @@ export async function POST(request: Request) {
   // 4. 清 OTP row
   await appsSupabase().from('otp_codes').delete().eq('email', email);
 
-  // 5. 设 cookie
-  const secure = request.url.startsWith('https://') ? '; Secure' : '';
-  const cookieValue = JSON.stringify({
-    access_token: finalSession.access_token,
-    refresh_token: finalSession.refresh_token,
-    expires_at: finalSession.expires_at,
-  });
-
+  // 5. 设 cookie（格式在 sessionCookie 里，纯函数）
   return new NextResponse(
     JSON.stringify({ ok: true, user: { id: finalUser.id, email: finalUser.email } }),
     {
       status: 200,
       headers: {
         'content-type': 'application/json',
-        'set-cookie': `forge_session=${encodeURIComponent(cookieValue)}; HttpOnly; Path=/; SameSite=Lax; Max-Age=2592000${secure}`,
+        'set-cookie': sessionCookie(finalSession, {
+          secure: request.url.startsWith('https://'),
+        }),
       },
     },
   );
