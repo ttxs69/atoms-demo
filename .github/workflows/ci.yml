@@ -1,0 +1,23 @@
+name: ci
+
+# 质量门禁：push main（Railway 的 Wait for CI 依赖此工作流全绿才部署）
+# 与 PR。全部步骤离线、无密钥——单测用 PGlite 内存库，live 用例无
+# RUN_LIVE 自动跳过。e2e 故意不进 CI（真实 LLM/E2B/计费，手动跑）。
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
