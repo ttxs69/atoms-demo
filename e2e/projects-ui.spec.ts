@@ -1,4 +1,6 @@
 import { test, expect } from '@playwright/test';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { readFileSync } from 'node:fs';
 
 /**
  * 项目 CRUD 的 UI 交互路径（补 full-flow 的 API 级覆盖缺口）：
@@ -6,6 +8,34 @@ import { test, expect } from '@playwright/test';
  * 身份走 magic link（服务端铸链，零邮件）；项目经页面内 fetch 创建（带 cookie）。
  */
 const URL_PUBLIC = process.env.PUBLIC_URL ?? 'http://localhost:3000';
+
+async function magicLinkLogin(page: import('@playwright/test').Page): Promise<void> {
+  const { createClient } = await import('@supabase/supabase-js');
+  const db = createClient(envOf('APPS_SUPABASE_URL'), envOf('APPS_SUPABASE_SECRET_KEY'), {
+    auth: { persistSession: false },
+  });
+  const email = `e2e-${Date.now().toString(36)}@test.dev`;
+  const { data: link, error } = await db.auth.admin.generateLink({
+    type: 'magiclink',
+    email,
+    options: { redirectTo: `${URL_PUBLIC}/auth/confirm` },
+  });
+  expect(error).toBeNull();
+  await page.goto(link!.properties.action_link, { waitUntil: 'domcontentloaded' });
+  await page.waitForURL((u) => !u.href.includes('/auth/confirm'), { timeout: 30_000 });
+}
+
+function envOf(key: string): string {
+  if (process.env[key]) return process.env[key] as string;
+  try {
+    for (const line of readFileSync('.env', 'utf8').split('\n')) {
+      if (line.startsWith(`${key}=`)) return line.slice(key.length + 1).trim();
+    }
+  } catch {
+    /* no .env */
+  }
+  return '';
+}
 
 test('登录用户在 /projects 上：改名(prompt) → 归档(confirm) → 新建跳转', async ({ page }) => {
   test.setTimeout(90_000);
@@ -75,4 +105,47 @@ test('登录用户在 /projects 上：改名(prompt) → 归档(confirm) → 新
   await page.getByRole('button', { name: '+ 新建项目' }).click();
   await expect(page).toHaveURL(/\/$|localhost:3000\/$|:3000\/$/);
   await expect(page.getByPlaceholder('描述你想做的东西…')).toBeVisible({ timeout: 15_000 });
+});
+
+test('打开 = 回到工作现场：项目列表 → 打开 → 对话回来（用户报告的回归）', async ({ page }) => {
+  test.setTimeout(90_000);
+  const marker = `回到现场${Date.now().toString(36)}`;
+
+  await magicLinkLogin(page);
+  const userId = await page.evaluate(async () => {
+    const me = await fetch('/api/auth/me').then((r) => r.json());
+    return me.user.id as string;
+  });
+
+  // 种子：一个带对话的项目（确定性，无 LLM）
+  const db: SupabaseClient = createClient(envOf('APPS_SUPABASE_URL'), envOf('APPS_SUPABASE_SECRET_KEY'), {
+    auth: { persistSession: false },
+  });
+  const { data: project } = await db
+    .from('projects')
+    .insert({ user_id: userId, name: `e2e-${marker}`, status: 'ready' })
+    .select('id')
+    .single();
+  await db.from('project_events').insert([
+    {
+      project_id: project!.id,
+      turn_id: `t-${marker}`,
+      message_id: null,
+      kind: 'user_message',
+      payload: { kind: 'user_message', messageId: null, text: `用户说 ${marker}` },
+    },
+  ]);
+
+  try {
+    // 项目列表 → 点「打开」
+    await page.goto('/projects', { waitUntil: 'domcontentloaded' });
+    await expect(page.getByText(`e2e-${marker}`)).toBeVisible({ timeout: 15_000 });
+    await page.getByRole('button', { name: '打开' }).click();
+
+    // 回到工作区，对话现场水合（marker 来自 journal，不是缓存）
+    await page.waitForURL((u) => !u.href.includes('/projects'), { timeout: 15_000 });
+    await expect(page.locator('section[aria-label="对话"]')).toContainText(marker, { timeout: 30_000 });
+  } finally {
+    await db.from('projects').update({ status: 'archived' }).eq('id', project!.id);
+  }
 });

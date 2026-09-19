@@ -142,12 +142,19 @@ export default function ProjectsPage() {
                     </div>
                   </div>
                   <div className="flex gap-2 pt-2">
-                    <a
-                      href={`/projects/${p.id}`}
-                      className="inline-flex items-center justify-center rounded-md text-sm font-medium border border-input bg-background hover:bg-accent h-7 px-2.5"
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 px-2.5"
+                      onClick={() => {
+                        // 打开 = 回到工作现场（对话 + 预览 + 继续迭代），不是元数据详情页。
+                        // 先 GET 详情顺手 bump last_opened_at —— 工作区水合与 generate 的
+                        // resolveProject 都按它取“最近项目”，多项目未来同样正确。
+                        void fetch(`/api/projects/${p.id}`).then(() => router.push('/'));
+                      }}
                     >
                       打开
-                    </a>
+                    </Button>
                     <Button
                       size="sm"
                       variant="ghost"

@@ -169,6 +169,7 @@ export default function ProjectDetailPage() {
             </div>
           </div>
           <div className="flex gap-2">
+            <Button size="sm" onClick={() => router.push('/')}>在工作区继续</Button>
             <Button size="sm" variant="outline" onClick={() => setEditingName(true)}>改名</Button>
             <Button size="sm" variant="ghost" className="text-destructive" onClick={() => void archive()}>
               归档
