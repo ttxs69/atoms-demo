@@ -44,8 +44,10 @@ export class SharedProjectGate implements GatePort {
     const client = new Client({
       connectionString: this.#dbUrl,
       ssl: { rejectUnauthorized: false },
-      // Railway doesn't support outbound IPv6; Supabase's pooler resolves
-      // to IPv6 first. Force IPv4 or the connection silently fails.
+      // Supabase's pooler resolves to IPv6 first; without a forced family
+      // the connection can silently fail depending on the host's egress
+      // (IPv4-only networks — and IPv6-preferring ones — both bit us here).
+      family: 4,
     });
     await client.connect();
     const tx = async <T,>(fn: (c: import('../credits/ledger.ts').SqlClient) => Promise<T>): Promise<T> => {
