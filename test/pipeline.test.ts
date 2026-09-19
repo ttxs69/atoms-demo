@@ -821,11 +821,13 @@ test('the GC scheduler runs a sweep on boot and daily after, and can be stopped'
   const { startGcScheduler } = await import('../src/gc/scheduler.ts');
   const calls: number[] = [];
   const stop = startGcScheduler(
-    // 注入 sweep 桩 + 快时钟：每天一次 → 这里 10ms 一次验证节奏
+    // 注入 sweep 桩 + 快时钟：每天一次 → 这里 10ms 一次验证节奏。
+    // 窗口留足余量：慢 runner（CI）上事件循环延迟会丢拍，35ms/3 次
+    // 曾经闪过 CI——boot 首扫 + 若干拍，150ms 窗口只要求 ≥3 次。
     async () => { calls.push(Date.now()); },
     { intervalMs: 10 },
   );
-  await new Promise(r => setTimeout(r, 35));
+  await new Promise(r => setTimeout(r, 150));
   stop();
   const after = calls.length;
   await new Promise(r => setTimeout(r, 25));
