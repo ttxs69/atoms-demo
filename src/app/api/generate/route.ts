@@ -6,7 +6,7 @@ import type { StreamEvent } from '../../../domain/events.ts';
 import { foldTurn } from '../../../journal/fold.ts';
 import { supabaseJournal } from '../../../journal/supabase-journal.ts';
 import type { JournalPort } from '../../../ports/journal-port.ts';
-import { supabaseSnapshot } from '../../../ports/supabase-snapshot.ts';
+import { supabaseSnapshot, syncProjectFiles } from '../../../ports/supabase-snapshot.ts';
 import { appsSupabase } from '../../../lib/supabase.ts';
 import { keyFor, ledgerPort, requestScopedCredits, withRequestKey } from '../../../credits/route-credits.ts';
 import { sessionVerifierFromEnv } from '../../../auth/session.ts';
@@ -214,19 +214,25 @@ export async function POST(request: Request): Promise<Response> {
           }
           if (previewReady) {
             // The checkpoint itself ran inside the pipeline (hot, pre-pause).
-            // Here only the projects row flips to ready — fire-and-forget,
-            // errors logged: the row is display metadata, not durability.
-            void appsSupabase()
-              .from('projects')
-              .update({
-                status: 'ready',
-                file_count: snapshotFiles,
-                updated_at: new Date().toISOString(),
-              })
-              .eq('id', projectId)
+            // Here: sync the file manifest from the committed snapshot, THEN
+            // flip the projects row — chained so `status=ready` implies
+            // "manifest synced" (the e2e gate and the detail page both lean
+            // on this ordering). Fire-and-forget, errors logged.
+            void syncProjectFiles(appsSupabase(), projectId, nonNullSessionId)
+              .then(() =>
+                appsSupabase()
+                  .from('projects')
+                  .update({
+                    status: 'ready',
+                    file_count: snapshotFiles,
+                    updated_at: new Date().toISOString(),
+                  })
+                  .eq('id', projectId),
+              )
               .then(({ error }) => {
                 if (error) console.error('projects update failed:', error.message);
-              });
+              })
+              .catch((error) => console.error('project files sync failed:', error));
           }
         }
         controller.close();

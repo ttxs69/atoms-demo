@@ -168,7 +168,7 @@ Railway 单服务（`railway.json`）+ Postgres plugin + E2B/LLM/Supabase env �
 
 - 流式中硬刷新丢在途半条消息（升级路径：SSE `Last-Event-ID` + seq 续传）；
 - 快照 latest-wins：失败回合产物不进快照；无版本化（回滚功能未做）；
-- `project_files` 表存在但未使用（历史遗留，可删）；
+- ~~project_files 未使用~~ 已成为快照镜像的 manifest（syncProjectFiles，详情页消费）；多项目落地时需重估 workspace↔project 键映射；
 - 滥用检测、出站控制与配额、supervisor 分歧检测：**待固化**（CONTEXT.md）；
 - 每回合全量读树打点：产物规模大后应增量；
 - 匿名身份依赖 localStorage 持有的 Supabase 会话，清缓存即丢（升级是唯一保存路径——产品决策）。

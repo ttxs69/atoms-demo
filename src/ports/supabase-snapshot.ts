@@ -31,6 +31,40 @@ export function isSnapshotPath(path: string): boolean {
   );
 }
 
+/** Mirror the committed snapshot into `project_files` — the artifact
+ * manifest the detail page reads. Delete-then-insert per turn (idempotent,
+ * same pattern as the journal). Chained BEFORE the projects status update
+ * so `status=ready` also means "manifest synced".
+ * ponytail: MVP 1:1 project↔workspace — snapshot keyed by workspaceId,
+ * rows by projectId; the mapping breaks the day multi-project lands.
+ */
+export async function syncProjectFiles(
+  db: SupabaseClient,
+  projectId: string,
+  workspaceId: string,
+  bucket = 'project-snapshots',
+): Promise<number> {
+  const { data, error } = await db.storage.from(bucket).download(`${workspaceId}.json`);
+  if (error || !data) return 0;
+  let files: Record<string, string>;
+  try {
+    files = JSON.parse(await data.text()) as Record<string, string>;
+  } catch {
+    return 0;
+  }
+  await db.from('project_files').delete().eq('project_id', projectId);
+  const rows = Object.entries(files).map(([path, content]) => ({
+    project_id: projectId,
+    path,
+    bytes: Buffer.byteLength(content, 'utf8'),
+    storage_key: `${workspaceId}.json`,
+  }));
+  if (rows.length === 0) return 0;
+  const { error: insertError } = await db.from('project_files').insert(rows);
+  if (insertError) throw new Error(insertError.message);
+  return rows.length;
+}
+
 export function supabaseSnapshot(
   db: SupabaseClient,
   sandbox: SandboxPort,

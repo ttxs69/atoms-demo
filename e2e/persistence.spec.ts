@@ -313,4 +313,20 @@ test('完整链路：真实生成一个回合 → 刷新 → 对话仍在（jour
   // 水合后：用户消息（带唯一 marker）与 agent 回复都在
   await expect(page.getByText(marker).first()).toBeVisible({ timeout: 15_000 });
   await expect(page.getByText(/Mike|Emma|Alex/).first()).toBeVisible({ timeout: 15_000 });
+
+  // 详情页的文件清单与 header 计数同源（用户报告过「14 个文件 vs 还没有文件」
+  // 的矛盾——此处锁住 manifest 同步：status=ready ⟹ project_files 已镜像）
+  const detail = await page.evaluate(async () => {
+    const list = await fetch('/api/projects').then((r) => r.json());
+    const id = list.projects?.[0]?.id as string;
+    const res = await fetch(`/api/projects/${id}`);
+    return (await res.json()) as {
+      project: { file_count: number };
+      files: { path: string }[];
+    };
+  });
+  const paths = detail.files.map((f) => f.path);
+  expect(paths).toContain('package.json');
+  expect(paths).toContain('src/App.tsx');
+  expect(detail.project.file_count).toBe(detail.files.length);
 });

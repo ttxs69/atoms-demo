@@ -127,7 +127,7 @@ Postgres 里的一张表，GC 的持久化工作队列。
 
 ### 快照（snapshot）
 成功回合后写入 `project-snapshots` 桶的 `{ path → content }` JSON，按 **workspace id** 命名，latest-wins。
-- **不是** zip 导出（那是给用户的下载物），也不是逐文件 `project_files` 行（表在但不用）。
+- **不是** zip 导出（那是给用户的下载物）；`project_files` 行是它的镜像 manifest（syncProjectFiles 同步，详情页读）。
 - 为什么存在：沙箱死亡后的冷恢复真相；键与 deletion_queue 一致，GC 按行删对象（docs/04 §3.3）。
 
 ## 部署层
