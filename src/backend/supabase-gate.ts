@@ -41,13 +41,19 @@ export class SharedProjectGate implements GatePort {
     if (this.#db) return this.#db; // injected (tests)
     if (!this.#dbUrl) return null; // not configured
     const { Client } = await import('pg');
+    const { lookup } = await import('node:dns/promises');
+    // Supabase's pooler resolves to IPv6 first; pin IPv4 by resolving the
+    // host ourselves (pg's ClientConfig has no family option) so the
+    // connection cannot silently fail on IPv4-only egress.
+    const u = new URL(this.#dbUrl);
+    const { address } = await lookup(u.hostname, { family: 4 });
     const client = new Client({
-      connectionString: this.#dbUrl,
+      host: address,
+      port: Number(u.port),
+      user: u.username,
+      password: decodeURIComponent(u.password),
+      database: u.pathname.slice(1),
       ssl: { rejectUnauthorized: false },
-      // Supabase's pooler resolves to IPv6 first; without a forced family
-      // the connection can silently fail depending on the host's egress
-      // (IPv4-only networks — and IPv6-preferring ones — both bit us here).
-      family: 4,
     });
     await client.connect();
     const tx = async <T,>(fn: (c: import('../credits/ledger.ts').SqlClient) => Promise<T>): Promise<T> => {
