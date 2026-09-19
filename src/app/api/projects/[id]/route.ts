@@ -1,6 +1,7 @@
 import 'server-only';
 import { NextResponse } from 'next/server';
 import { platformSupabase, appsSupabase, readAccessToken } from '@/lib/supabase.ts';
+import { syncProjectFiles } from '@/ports/supabase-snapshot.ts';
 
 export const runtime = 'nodejs';
 
@@ -32,10 +33,28 @@ export async function GET(
     return NextResponse.json({ error: error?.message ?? 'Not found' }, { status: 404 });
   }
 
-  const { data: files } = await appsSupabase()
+  const { data: initialFiles } = await appsSupabase()
     .from('project_files')
     .select('path, bytes, storage_key')
     .eq('project_id', id);
+  let files = initialFiles;
+
+  // 自愈回填：存量项目在 syncProjectFiles 上线前生成，manifest 从未写入过
+  // （header 计数来自快照、清单来自 project_files——两代混读的残留）。
+  // 计数说有文件而清单为空 → 从已提交的快照镜像一次；幂等，首次触发后
+  // 再也不进这个分支。失败不影响 GET（下次再看时重试）。
+  if ((files ?? []).length === 0 && (project.file_count ?? 0) > 0) {
+    try {
+      await syncProjectFiles(appsSupabase(), id, project.user_id);
+      const { data: backfilled } = await appsSupabase()
+        .from('project_files')
+        .select('path, bytes, storage_key')
+        .eq('project_id', id);
+      files = backfilled ?? files;
+    } catch (e) {
+      console.error('project files backfill failed:', e);
+    }
+  }
 
   // 更新 last_opened_at
   await appsSupabase()

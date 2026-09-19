@@ -117,13 +117,14 @@ test('打开 = 回到工作现场：项目列表 → 打开 → 对话回来（�
     return me.user.id as string;
   });
 
-  // 种子：一个带对话的项目（确定性，无 LLM）
+  // 种子：一个带对话的项目（确定性，无 LLM）+ 一份已提交的快照对象
+  // （模拟存量项目：file_count>0 但 project_files 从未写入——自愈回填的靶子）
   const db: SupabaseClient = createClient(envOf('APPS_SUPABASE_URL'), envOf('APPS_SUPABASE_SECRET_KEY'), {
     auth: { persistSession: false },
   });
   const { data: project } = await db
     .from('projects')
-    .insert({ user_id: userId, name: `e2e-${marker}`, status: 'ready' })
+    .insert({ user_id: userId, name: `e2e-${marker}`, status: 'ready', file_count: 2 })
     .select('id')
     .single();
   await db.from('project_events').insert([
@@ -135,8 +136,22 @@ test('打开 = 回到工作现场：项目列表 → 打开 → 对话回来（�
       payload: { kind: 'user_message', messageId: null, text: `用户说 ${marker}` },
     },
   ]);
+  await db.storage
+    .from('project-snapshots')
+    .upload(
+      `${userId}.json`,
+      JSON.stringify({ 'src/App.tsx': `// ${marker}`, 'package.json': '{}' }),
+      { upsert: true, contentType: 'application/json' },
+    );
 
   try {
+    // 自愈回填：详情 GET 看到「计数>0 但清单空」→ 从快照镜像（用户报告的存量项目形态）
+    const detail = await page.evaluate(async (pid: string) => {
+      const res = await fetch(`/api/projects/${pid}`);
+      return (await res.json()) as { files: { path: string }[] };
+    }, project!.id);
+    expect(detail.files.map((f) => f.path)).toContain('src/App.tsx');
+
     // 项目列表 → 点「打开」
     await page.goto('/projects', { waitUntil: 'domcontentloaded' });
     await expect(page.getByText(`e2e-${marker}`)).toBeVisible({ timeout: 15_000 });
