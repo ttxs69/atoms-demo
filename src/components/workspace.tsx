@@ -130,7 +130,10 @@ function recordsToMessages(records: JournalRecord[]): Message[] {
   return out;
 }
 
-export function Workspace() {
+export function Workspace({ projectId }: { projectId?: string } = {}) {
+  // URL 驱动（ChatGPT 约定）：`/` 无 id = 新开始；`/projects/[id]` 带 id =
+  // 该项目的工作现场。项目归属由 URL 唯一决定，不再有进入路径魔法。
+  const projectIdRef = useRef<string | null>(projectId ?? null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [log, setLog] = useState<string[]>([]);
   const [input, setInput] = useState('');
@@ -153,7 +156,6 @@ export function Workspace() {
 
   const sessionIdRef = useRef<string>('');
   const toolArgsRef = useRef(new Map<string, string>());
-  const projectIdRef = useRef<string | null>(null);
 
   const applyEvent = useCallback((event: StreamEvent) => {
     setLog((prev) => [...prev, JSON.stringify(event)]);
@@ -352,8 +354,8 @@ export function Workspace() {
     // returning logged-in users (via /api/auth/me) get their preview back
     // exactly like anonymous users with an existing session do.
     const restoreWorkspace = async (): Promise<void> => {
-      // `?new=1`（＋新建项目）：新开始不回旧预览——与水合门控同规则。
-      if (new URLSearchParams(window.location.search).get('new') === '1') return;
+      // 只在绑定了项目的工作现场恢复预览；`/`（新建）永远空白。
+      if (!projectIdRef.current) return;
       try {
         const res = await fetch('/api/preview');
         if (res.ok) {
@@ -474,31 +476,26 @@ export function Workspace() {
   }, []);
 
 
-  // Hydration (docs/04 §3.2): a real identity owns a projects row — replay
-  // the conversation so a refresh starts where the user left off. Dev
-  // sessions have nothing persisted, by design. `?new=1` (＋新建项目) opts
-  // OUT: a fresh start must not resurrect the old conversation.
+  // Hydration (docs/04 §3.2)：按 URL 的项目 id 重放对话（`/` 不水合——
+  // 新开始就是新开始）。404/无权限回列表，不留字面量死胡同。
   useEffect(() => {
+    if (!projectId) return;
     if (!identity || identity.startsWith('dev-')) return;
-    if (new URLSearchParams(window.location.search).get('new') === '1') return;
     void (async () => {
       try {
-        const res = await fetch('/api/projects');
-        if (!res.ok) return;
-        const { projects } = (await res.json()) as { projects?: { id: string }[] };
-        const active = projects?.[0];
-        if (!active) return; // never generated — nothing to replay
-        projectIdRef.current = active.id; // bind the workspace to THIS project
-        const ev = await fetch(`/api/projects/${active.id}/events`);
-        if (!ev.ok) return;
+        const ev = await fetch(`/api/projects/${projectId}/events`);
+        if (!ev.ok) {
+          window.location.href = '/projects';
+          return;
+        }
         const { events } = (await ev.json()) as { events?: { payload: JournalRecord }[] };
         const messages = (events ?? []).map((row) => row.payload);
         if (messages.length > 0) setMessages(recordsToMessages(messages));
       } catch {
-        /* first visit or persistence unavailable — live stream still works */
+        /* persistence unavailable — live stream still works */
       }
     })();
-  }, [identity]);
+  }, [identity, projectId]);
 
   const signOut = useCallback(async () => {
     await fetch('/api/auth/signout', { method: 'POST' });
@@ -520,11 +517,10 @@ export function Workspace() {
       { kind: 'user', messageId: `u-${prev.length}`, text: message },
     ]);
 
-    // 新建模式（?new=1）：首条消息先建草稿项目再生成——否则路由会挑
-    // “最近项目”，把新对话写进旧项目的 journal。常态模式：要么用
-    // 水合绑定的 id，要么留空让路由自行解析（保持原行为）。
-    const isNew = new URLSearchParams(window.location.search).get('new') === '1';
-    if (isNew && !projectIdRef.current && !identity?.startsWith('dev-')) {
+    // `/`（新建模式）：首条消息先建草稿项目，立刻把 URL 换成项目地址
+    // （history.replaceState 不重挂组件、不打断流），此后所有回合带着
+    // 显式 projectId。绑定后的现场不再隐式解析“最近项目”。
+    if (!projectIdRef.current && !identity?.startsWith('dev-')) {
       try {
         const res = await fetch('/api/projects', {
           method: 'POST',
@@ -532,7 +528,10 @@ export function Workspace() {
           body: JSON.stringify({ name: message.slice(0, 24) || '未命名项目' }),
         });
         const { project } = (await res.json()) as { project?: { id: string } };
-        if (project) projectIdRef.current = project.id;
+        if (project) {
+          projectIdRef.current = project.id;
+          window.history.replaceState(null, '', `/projects/${project.id}`);
+        }
       } catch {
         /* fall through: route resolves most-recent (old behavior) */
       }

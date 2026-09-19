@@ -118,9 +118,11 @@ test('完整流程：注册 → 登录 → 项目 CRUD → 退出', async ({ pag
   expect(after.find((p) => p.id === project.id)?.name).toBe('改名后的项目');
 
   // ============ 详情页渲染（包含改名）============
-  console.log('▶ 9. /projects/:id 详情页渲染');
+  console.log('▶ 9. /projects/:id 工作现场渲染（URL 即项目地址）');
   await page.goto(`${URL_PUBLIC}/projects/${project.id}`, { waitUntil: 'domcontentloaded' });
-  await expect(page.getByRole('heading', { name: '改名后的项目' })).toBeVisible({ timeout: 15000 });
+  // 空会话项目（未生成过）：工作现场渲染为空白待开始，不报错不字面量死胡同
+  await expect(page.getByRole('heading', { name: '想做点什么？' })).toBeVisible({ timeout: 15000 });
+  await expect(page.getByPlaceholder('描述你想做的东西…')).toBeVisible();
 
   // ============ 删除（软删除）============
   console.log('▶ 10. DELETE /api/projects/:id 归档');

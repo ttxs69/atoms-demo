@@ -32,6 +32,13 @@ export async function GET(
 
   const after = Number(new URL(request.url).searchParams.get('after') ?? '0');
 
+  // 读路径顺手刷新 last_opened_at——项目列表的“最近”排序依据。旧路径
+  // （详情 GET bump）随详情页退役，归位到这里。
+  void appsSupabase()
+    .from('projects')
+    .update({ last_opened_at: new Date().toISOString() })
+    .eq('id', id);
+
   let query = appsSupabase()
     .from('project_events')
     .select('seq, kind, message_id, payload')

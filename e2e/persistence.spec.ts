@@ -126,8 +126,8 @@ test('种子回放：project_events 经真实 PostgREST 往返后刷新可水合
   expect(eventsError).toBeNull();
 
   try {
-    // 刷新 → 挂载水合（/api/projects → events）→ 对话区可见
-    await page.reload();
+    // URL 即状态：直访项目工作现场 → 挂载水合（/api/projects/[id]/events）
+    await page.goto(`/projects/${projectId}`, { waitUntil: 'domcontentloaded' });
     await expect(page.getByText(`用户说 ${seedMarker}`)).toBeVisible({ timeout: 15_000 });
     await expect(page.getByText(`Alex 写好了 ${seedMarker}`)).toBeVisible();
     await expect(page.getByText('Alex').first()).toBeVisible();
@@ -286,8 +286,13 @@ test('AC3 登录找回：升级→清环境→magic link 重登→对话与 work
   await page.goto(link!.properties.action_link, { waitUntil: 'domcontentloaded' });
   await page.waitForURL((u) => !u.href.includes('/auth/confirm'), { timeout: 30_000 });
 
-  // 回到工作区：对话水合（marker 来自 journal）+ workspace 恢复（预览徽标）
-  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  // 回到工作现场：经列表「打开」（标准导航——URL 即项目地址），对话水合
+  // （marker 来自 journal）+ workspace 恢复（预览徽标）
+  await page.goto('/projects', { waitUntil: 'domcontentloaded' });
+  const openHref = await page.getByRole('link', { name: '打开' }).first().getAttribute('href');
+  expect(openHref).toMatch(/^\/projects\//);
+  await page.getByRole('link', { name: '打开' }).first().click();
+  await page.waitForURL((u) => /\/projects\//.test(u.pathname), { timeout: 15_000 });
   await expect(page.locator('section[aria-label="对话"]')).toContainText(marker, { timeout: 30_000 });
   await expect(page.locator('header')).toContainText('运行中', { timeout: 30_000 });
 });

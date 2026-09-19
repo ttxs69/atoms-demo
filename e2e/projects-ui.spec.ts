@@ -101,9 +101,9 @@ test('登录用户在 /projects 上：改名(prompt) → 归档(confirm) → 新
   await expect(page.getByText('改过的名字')).toBeHidden({ timeout: 10_000 });
   await expect(page.getByText('开始第一个')).toBeVisible({ timeout: 10_000 });
 
-  // + 新建项目 → 跳回工作区（新建模式：空白开始）
+  // + 新建项目 → `/`（永远 = 新开始）
   await page.getByRole('button', { name: '+ 新建项目' }).click();
-  await expect(page).toHaveURL(/\/\?new=1/);
+  await expect(page).toHaveURL(/\/$/);
   await expect(page.getByPlaceholder('描述你想做的东西…')).toBeVisible({ timeout: 15_000 });
   await expect(page.getByRole('heading', { name: '想做点什么？' })).toBeVisible({ timeout: 15_000 });
 });
@@ -156,10 +156,10 @@ test('打开 = 回到工作现场：项目列表 → 打开 → 对话回来（�
     // 项目列表 → 点「打开」
     await page.goto('/projects', { waitUntil: 'domcontentloaded' });
     await expect(page.getByText(`e2e-${marker}`)).toBeVisible({ timeout: 15_000 });
-    await page.getByRole('button', { name: '打开' }).click();
+    await page.getByRole('link', { name: '打开' }).click();
 
-    // 回到工作区，对话现场水合（marker 来自 journal，不是缓存）
-    await page.waitForURL((u) => !u.href.includes('/projects'), { timeout: 15_000 });
+    // 回到该项目的工作现场（URL 即项目地址），对话水合（marker 来自 journal）
+    await page.waitForURL((u) => u.pathname === `/projects/${project!.id}`, { timeout: 15_000 });
     await expect(page.locator('section[aria-label="对话"]')).toContainText(marker, { timeout: 30_000 });
   } finally {
     await db.from('projects').update({ status: 'archived' }).eq('id', project!.id);
@@ -200,8 +200,8 @@ test('＋新建项目 = 空白开始：不回放旧对话、不回旧预览（�
     await expect(page.getByText(`e2e-${marker}`)).toBeVisible({ timeout: 15_000 });
     await page.getByRole('button', { name: '+ 新建项目' }).click();
 
-    await page.waitForURL((u) => u.href.includes('new=1'), { timeout: 15_000 });
-    // 空白开始：空状态可见，旧对话未被水合
+    await page.waitForURL((u) => u.pathname === '/', { timeout: 15_000 });
+    // 空白开始：空状态可见，旧对话未被水合（URL 驱动：`/` 不再回放任何旧项目）
     await expect(page.getByRole('heading', { name: '想做点什么？' })).toBeVisible({ timeout: 15_000 });
     await expect(page.locator('section[aria-label="对话"]')).not.toContainText(marker);
   } finally {
