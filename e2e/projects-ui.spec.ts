@@ -166,6 +166,66 @@ test('打开 = 回到工作现场：项目列表 → 打开 → 对话回来（�
   }
 });
 
+test('长对话：聊天窗格内部滚动，页面/预览列不被撑长（布局回归）', async ({ page }) => {
+  test.setTimeout(60_000);
+  const marker = `长对话${Date.now().toString(36)}`;
+
+  await magicLinkLogin(page);
+  const userId = await page.evaluate(async () => {
+    const me = await fetch('/api/auth/me').then((r) => r.json());
+    return me.user.id as string;
+  });
+
+  // 种子 40 条消息——足够把未修复的页面撑出多个屏高
+  const db: SupabaseClient = createClient(envOf('APPS_SUPABASE_URL'), envOf('APPS_SUPABASE_SECRET_KEY'), {
+    auth: { persistSession: false },
+  });
+  const { data: project } = await db
+    .from('projects')
+    .insert({ user_id: userId, name: `e2e-${marker}`, status: 'ready' })
+    .select('id')
+    .single();
+  const rows = Array.from({ length: 40 }, (_, i) => ({
+    project_id: project!.id,
+    turn_id: `t-${marker}`,
+    message_id: `m-${i}`,
+    kind: i % 2 === 0 ? 'user_message' : 'agent_message',
+    payload:
+      i % 2 === 0
+        ? { kind: 'user_message', messageId: `m-${i}`, text: `第 ${i} 条：${marker}` }
+        : {
+            kind: 'agent_message',
+            messageId: `m-${i}`,
+            agentHandle: 'eng',
+            text: `回复第 ${i} 条：${marker}，这里是足够长的回复文本。`,
+            files: [],
+            errors: [],
+            creditsUsed: 1,
+            aborted: false,
+          },
+  }));
+  await db.from('project_events').insert(rows);
+
+  try {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto(`/projects/${project!.id}`, { waitUntil: 'domcontentloaded' });
+    // 先等水合完成（消息上屏），再谈布局——空窗格的测量毫无意义
+    await expect(page.getByText(`第 0 条：${marker}`)).toBeVisible({ timeout: 15_000 });
+    const layout = await page.evaluate(() => {
+      const chat = document.querySelector('section') as HTMLElement | null;
+      const scroller = chat?.querySelector(':scope > div') as HTMLElement | null;
+      return {
+        pageScrollable: document.documentElement.scrollHeight > window.innerHeight + 40,
+        chatScrollable: !!scroller && scroller.scrollHeight > scroller.clientHeight + 40,
+      };
+    });
+    expect(layout.pageScrollable, '页面整体不应被撑长').toBe(false);
+    expect(layout.chatScrollable, '聊天窗格应内部滚动').toBe(true);
+  } finally {
+    await db.from('projects').update({ status: 'archived' }).eq('id', project!.id);
+  }
+});
+
 test('＋新建项目 = 空白开始：不回放旧对话、不回旧预览（用户报告的语义缺陷）', async ({ page }) => {
   test.setTimeout(60_000);
   const marker = `旧对话${Date.now().toString(36)}`;

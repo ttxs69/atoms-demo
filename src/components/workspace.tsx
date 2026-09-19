@@ -156,6 +156,16 @@ export function Workspace({ projectId }: { projectId?: string } = {}) {
 
   const sessionIdRef = useRef<string>('');
   const toolArgsRef = useRef(new Map<string, string>());
+  const chatScrollRef = useRef<HTMLDivElement>(null);
+
+  // 贴底滚动：流式输出/新消息时若用户在底部附近则跟随（标准聊天行为）；
+  // 用户上翻阅读时不打扰。
+  useEffect(() => {
+    const el = chatScrollRef.current;
+    if (!el) return;
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+    if (nearBottom) el.scrollTop = el.scrollHeight;
+  }, [messages, planFiles]);
 
   const applyEvent = useCallback((event: StreamEvent) => {
     setLog((prev) => [...prev, JSON.stringify(event)]);
@@ -582,9 +592,9 @@ export function Workspace({ projectId }: { projectId?: string } = {}) {
   }, [applyEvent, input, streaming]);
 
   return (
-    <div className="min-h-screen flex flex-col bg-background text-foreground">
+    <div className="min-h-screen lg:h-dvh lg:overflow-hidden flex flex-col bg-background text-foreground">
       {/* Topbar */}
-      <header className="border-b bg-background/95 backdrop-blur sticky top-0 z-10">
+      <header className="border-b bg-background/95 backdrop-blur lg:static sticky top-0 z-10">
         <div className="flex items-center gap-2 px-4 h-12">
           <div className="text-base font-semibold tracking-tight">
             Forge<span className="text-primary">.</span>
@@ -639,7 +649,7 @@ export function Workspace({ projectId }: { projectId?: string } = {}) {
       <div className={`flex-1 grid grid-cols-1 min-h-0 ${previewOpen ? 'lg:grid-cols-[1fr_minmax(420px,1fr)]' : ''}`}>
         {/* Chat pane */}
         <section className="flex flex-col min-h-0 border-r" aria-label="对话">
-          <div className="flex-1 overflow-y-auto px-4 py-6 space-y-4">
+          <div ref={chatScrollRef} className="flex-1 overflow-y-auto px-4 py-6 space-y-4">
             {messages.length === 0 ? (
               <EmptyState
                 onExampleClick={(text) => {
