@@ -95,7 +95,7 @@ export default function ProjectsPage() {
             Forge<span className="text-primary">.</span>
           </a>
           <div className="flex-1" />
-          <Button size="sm" variant="outline" onClick={() => router.push('/')}>
+          <Button size="sm" variant="outline" onClick={() => router.push('/?new=1')}>
             + 新建项目
           </Button>
           {userEmail ? (

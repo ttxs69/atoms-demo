@@ -153,6 +153,7 @@ export function Workspace() {
 
   const sessionIdRef = useRef<string>('');
   const toolArgsRef = useRef(new Map<string, string>());
+  const projectIdRef = useRef<string | null>(null);
 
   const applyEvent = useCallback((event: StreamEvent) => {
     setLog((prev) => [...prev, JSON.stringify(event)]);
@@ -351,6 +352,8 @@ export function Workspace() {
     // returning logged-in users (via /api/auth/me) get their preview back
     // exactly like anonymous users with an existing session do.
     const restoreWorkspace = async (): Promise<void> => {
+      // `?new=1`（＋新建项目）：新开始不回旧预览——与水合门控同规则。
+      if (new URLSearchParams(window.location.search).get('new') === '1') return;
       try {
         const res = await fetch('/api/preview');
         if (res.ok) {
@@ -473,9 +476,11 @@ export function Workspace() {
 
   // Hydration (docs/04 §3.2): a real identity owns a projects row — replay
   // the conversation so a refresh starts where the user left off. Dev
-  // sessions have nothing persisted, by design.
+  // sessions have nothing persisted, by design. `?new=1` (＋新建项目) opts
+  // OUT: a fresh start must not resurrect the old conversation.
   useEffect(() => {
     if (!identity || identity.startsWith('dev-')) return;
+    if (new URLSearchParams(window.location.search).get('new') === '1') return;
     void (async () => {
       try {
         const res = await fetch('/api/projects');
@@ -483,6 +488,7 @@ export function Workspace() {
         const { projects } = (await res.json()) as { projects?: { id: string }[] };
         const active = projects?.[0];
         if (!active) return; // never generated — nothing to replay
+        projectIdRef.current = active.id; // bind the workspace to THIS project
         const ev = await fetch(`/api/projects/${active.id}/events`);
         if (!ev.ok) return;
         const { events } = (await ev.json()) as { events?: { payload: JournalRecord }[] };
@@ -514,13 +520,34 @@ export function Workspace() {
       { kind: 'user', messageId: `u-${prev.length}`, text: message },
     ]);
 
+    // 新建模式（?new=1）：首条消息先建草稿项目再生成——否则路由会挑
+    // “最近项目”，把新对话写进旧项目的 journal。常态模式：要么用
+    // 水合绑定的 id，要么留空让路由自行解析（保持原行为）。
+    const isNew = new URLSearchParams(window.location.search).get('new') === '1';
+    if (isNew && !projectIdRef.current && !identity?.startsWith('dev-')) {
+      try {
+        const res = await fetch('/api/projects', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ name: message.slice(0, 24) || '未命名项目' }),
+        });
+        const { project } = (await res.json()) as { project?: { id: string } };
+        if (project) projectIdRef.current = project.id;
+      } catch {
+        /* fall through: route resolves most-recent (old behavior) */
+      }
+    }
+
     const controller = new AbortController();
     abortRef.current = controller;
     try {
       const response = await fetch('/api/generate', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ message }),
+        body: JSON.stringify({
+          message,
+          ...(projectIdRef.current ? { projectId: projectIdRef.current } : {}),
+        }),
         signal: controller.signal,
         ...(identity?.startsWith('dev-')
           ? { headers: { 'content-type': 'application/json', 'x-dev-session': sessionIdRef.current } }

@@ -125,8 +125,9 @@ export async function POST(request: Request): Promise<Response> {
   }
 
 
-  const { message } = (body ?? {}) as {
+  const { message, projectId: requestedProjectId } = (body ?? {}) as {
     message?: unknown;
+    projectId?: unknown;
   };
 
   if (sessionId === null || sessionId.length === 0) {
@@ -166,7 +167,22 @@ export async function POST(request: Request): Promise<Response> {
   const journal = sessionId.startsWith('dev-') ? null : journalFromEnv();
   let projectId: string | null = null;
   if (journal) {
-    projectId = await resolveProject(nonNullSessionId, message);
+    if (typeof requestedProjectId === 'string' && requestedProjectId.length > 0) {
+      // 显式目标（新建模式/绑定后的工作区）：验属主后使用，不验则 403——
+      // 宁拒也不能把别人的项目当目标。
+      const { data: owned } = await appsSupabase()
+        .from('projects')
+        .select('id')
+        .eq('id', requestedProjectId)
+        .eq('user_id', nonNullSessionId)
+        .single();
+      if (!owned) {
+        return Response.json({ error: 'Project not found for this user.' }, { status: 403 });
+      }
+      projectId = requestedProjectId;
+    } else {
+      projectId = await resolveProject(nonNullSessionId, message);
+    }
     if (!projectId) {
       return Response.json({ error: 'Could not resolve project.' }, { status: 500 });
     }

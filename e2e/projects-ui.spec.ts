@@ -101,10 +101,11 @@ test('登录用户在 /projects 上：改名(prompt) → 归档(confirm) → 新
   await expect(page.getByText('改过的名字')).toBeHidden({ timeout: 10_000 });
   await expect(page.getByText('开始第一个')).toBeVisible({ timeout: 10_000 });
 
-  // + 新建项目 → 跳回工作区
+  // + 新建项目 → 跳回工作区（新建模式：空白开始）
   await page.getByRole('button', { name: '+ 新建项目' }).click();
-  await expect(page).toHaveURL(/\/$|localhost:3000\/$|:3000\/$/);
+  await expect(page).toHaveURL(/\/\?new=1/);
   await expect(page.getByPlaceholder('描述你想做的东西…')).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByRole('heading', { name: '想做点什么？' })).toBeVisible({ timeout: 15_000 });
 });
 
 test('打开 = 回到工作现场：项目列表 → 打开 → 对话回来（用户报告的回归）', async ({ page }) => {
@@ -160,6 +161,49 @@ test('打开 = 回到工作现场：项目列表 → 打开 → 对话回来（�
     // 回到工作区，对话现场水合（marker 来自 journal，不是缓存）
     await page.waitForURL((u) => !u.href.includes('/projects'), { timeout: 15_000 });
     await expect(page.locator('section[aria-label="对话"]')).toContainText(marker, { timeout: 30_000 });
+  } finally {
+    await db.from('projects').update({ status: 'archived' }).eq('id', project!.id);
+  }
+});
+
+test('＋新建项目 = 空白开始：不回放旧对话、不回旧预览（用户报告的语义缺陷）', async ({ page }) => {
+  test.setTimeout(60_000);
+  const marker = `旧对话${Date.now().toString(36)}`;
+
+  await magicLinkLogin(page);
+  const userId = await page.evaluate(async () => {
+    const me = await fetch('/api/auth/me').then((r) => r.json());
+    return me.user.id as string;
+  });
+
+  // 在场证据：一个带对话的旧项目（水合若发生，marker 必然出现）
+  const db: SupabaseClient = createClient(envOf('APPS_SUPABASE_URL'), envOf('APPS_SUPABASE_SECRET_KEY'), {
+    auth: { persistSession: false },
+  });
+  const { data: project } = await db
+    .from('projects')
+    .insert({ user_id: userId, name: `e2e-${marker}`, status: 'ready', file_count: 1, last_opened_at: new Date().toISOString() })
+    .select('id')
+    .single();
+  await db.from('project_events').insert([
+    {
+      project_id: project!.id,
+      turn_id: `t-${marker}`,
+      message_id: null,
+      kind: 'user_message',
+      payload: { kind: 'user_message', messageId: null, text: `用户说 ${marker}` },
+    },
+  ]);
+
+  try {
+    await page.goto('/projects', { waitUntil: 'domcontentloaded' });
+    await expect(page.getByText(`e2e-${marker}`)).toBeVisible({ timeout: 15_000 });
+    await page.getByRole('button', { name: '+ 新建项目' }).click();
+
+    await page.waitForURL((u) => u.href.includes('new=1'), { timeout: 15_000 });
+    // 空白开始：空状态可见，旧对话未被水合
+    await expect(page.getByRole('heading', { name: '想做点什么？' })).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator('section[aria-label="对话"]')).not.toContainText(marker);
   } finally {
     await db.from('projects').update({ status: 'archived' }).eq('id', project!.id);
   }
