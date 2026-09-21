@@ -3,7 +3,8 @@
 | 项 | 值 |
 |---|---|
 | 版本 | 1.0（2026-09-19，随持久化落地后整理） |
-| 状态 | 现行架构，**取代 03-architecture.md 的旧设计**（k8s / 容器 / namespace 等词已废弃，见 CONTEXT.md） |
+| 状态 | 现行架构，**取代 `archive/03-architecture-v1.md` 的旧设计**（k8s / 容器 / namespace 等词已废弃，见 CONTEXT.md） |
+| 记法 | C4 模型（上下文/容器/模块）+ 时序图，Mermaid；章节组织对齐 arc42 |
 | 范围 | 用户可见系统边界之内；领域词汇以 CONTEXT.md 为准 |
 | 依据 | 代码现状逐文件核对；关键决策可追溯至 docs/04 与 tickets（.scratch/issues/） |
 
@@ -33,24 +34,47 @@ Forge 是一个 AI 应用生成平台：用户用自然语言描述需求，多 
 
 ## 3. 系统上下文（C4-L1）
 
-```
-用户(浏览器)
-   │ HTTPS/SSE
-   ▼
-┌─────────┐   E2B API     ┌──────────────┐
-│  Forge   │──────────────▶│ E2B 沙箱集群  │ (生成应用的运行处)
-│ (Railway)│   LLM API     └──────────────┘
-│          │──────────────▶ LLM 提供商(DeepSeek 等, env 驱动)
-│          │   REST/SQL    ┌──────────────┐
-│          │──────────────▶│ Supabase 项目 │ auth / projects /
-└─────────┘                └──────────────┘ project_events / Storage
-                                  ▲ SQL (quota/deletion_queue)
-                            ┌─────┴─────┐
-                            │ 平台 Postgres│ (Railway plugin)
-                            └───────────┘
+```mermaid
+flowchart LR
+    U(["用户（浏览器）"])
+    FORGE["Forge（Railway 长驻单服务）<br/>AI 应用生成平台"]
+    E2B["E2B 沙箱集群<br/>Firecracker microVM / workspace"]
+    LLM["LLM 提供商<br/>DeepSeek 等，env 驱动"]
+    SB["Supabase 项目<br/>auth / projects /<br/>project_events / Storage"]
+
+    U -- "HTTPS / SSE" --> FORGE
+    U -- "预览 iframe（E2B 公开 URL）" --> E2B
+    FORGE -- "E2B API（SandboxPort）" --> E2B
+    FORGE -- "LLM API（ModelPort）" --> LLM
+    FORGE -- "REST / SQL（JournalPort 等）" --> SB
 ```
 
 外部依赖均经 port 隔离；LLM 协议 OpenAI/Anthropic 双兼容（`llm-model-adapter`）。
+
+### 3.1 容器视图（C4-L2）
+
+```mermaid
+flowchart TB
+    U(["用户（浏览器）"])
+
+    subgraph RAILWAY["Railway 部署单元"]
+        NODE["Node 进程（长驻单机）<br/>app/ Next.js 路由层（薄壳）<br/>orchestrator/ 生成回合状态机<br/>gc/ 回收引擎 + 进程内定时器<br/>ports/ 六端口 + 适配器<br/>journal/ · credits/ · auth/ · domain/"]
+        PG[("平台 Postgres plugin<br/>quota / credit_ledger /<br/>bans / deletion_queue")]
+    end
+
+    E2B["E2B 沙箱集群"]
+    LLM["LLM 提供商"]
+    SB["Supabase<br/>auth + Postgres + Storage"]
+
+    U -- "HTTPS / SSE" --> NODE
+    U -- "预览 iframe" --> E2B
+    NODE -- "E2B API" --> E2B
+    NODE -- "LLM API" --> LLM
+    NODE -- "REST（service key）" --> SB
+    NODE -- "SQL" --> PG
+```
+
+单进程内无进程间通信边界——这是长驻单机决策的直接结果，升级路径见 §8。
 
 ## 4. 模块视图（C4-L3，映射到 src/）
 
@@ -70,6 +94,8 @@ src/
 ├─ auth/                       session 验证器、otp.ts(FP核)、turnstile、captcha
 ├─ credits/                    预扣+结算两阶段记账（幂等键）、route 绑定
 ├─ gc/                         依赖序回收引擎 + 生产 deleters + 进程内定时器
+├─ transport/                  SSE 线格式编码（纯函数）+ 零依赖 zip 导出
+├─ lib/ · components/          supabase 客户端 / ui 原语（workspace.tsx 见上）
 └─ backend/supabase-gate.ts    安全门（RLS 模板注入 + 扫描）
 ```
 
@@ -79,20 +105,34 @@ src/
 
 ### 5.1 生成回合（核心写路径）
 
-```
-POST /api/generate {message}
-  → 验证会话(SupabaseVerifier/DevVerifier) → 禁用检查 → resolveProject(最近/新建)
-  → status=generating → ReadableStream:
-      for await event of orchestrator.run(sessionId, message):
-        tee → turnEvents 缓冲 + SSE 下发
-  → orchestrator 内部:
-      reserve(预扣,幂等键) → sandboxFor(三级查找:内存→E2B→快照冷恢复)
-      → 首回合: pm 规划(plan_files) → eng 写文件(write_file, 仅 eng 可写)
-      → 管线: install → [迁移+RLS注入+安全门] → build(失败≤3轮自修复)
-      → dev server 起活 → ★热快照(pause 之前) → preview_ready{url,snapshotFiles}
-      → finally: pause(沙箱)
-  → 流结束 finally: foldTurn() → journal.appendTurn(先删后插,turn_id 幂等)
-      → previewReady 则回写 projects(status=ready,file_count)
+```mermaid
+sequenceDiagram
+    autonumber
+    actor U as 浏览器
+    participant R as 路由层 /api/generate
+    participant O as Orchestrator
+    participant C as CreditsPort
+    participant S as SandboxPort（E2B）
+    participant M as ModelPort（LLM）
+    participant J as JournalPort（Supabase）
+
+    U->>R: POST {message}
+    R->>R: 验证会话 → 禁用检查 → resolveProject
+    R-->>U: SSE ReadableStream（status=generating）
+    activate O
+    O->>C: reserve 预扣（幂等键）
+    O->>S: sandboxFor（内存→E2B→快照冷恢复）
+    O->>M: pm 规划 plan_files
+    O->>M: eng 写文件 write_file（仅 eng 可写）
+    O->>S: 管线 install → 迁移+RLS注入+安全门
+    O->>S: build（失败≤3轮自修复，错误上下文经 M 注入）
+    O->>S: dev server 起活
+    O->>S: ★热快照（pause 之前，写 Storage）
+    O-->>U: preview_ready {url, snapshotFiles}（SSE）
+    O->>S: pause（finally）
+    deactivate O
+    R->>J: foldTurn → appendTurn（先删后插，turn_id 幂等）
+    R->>J: 回写 projects（status=ready, file_count）
 ```
 
 **单写者**：`runQueue` 按会话串行化并发回合（双开标签页排队）。

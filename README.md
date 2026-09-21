@@ -152,7 +152,7 @@ src/
 | 文档 | 内容 |
 |---|---|
 | [docs/01](docs/01-atoms-core-features.md) · [02](docs/02-prd.md) | 竞品功能调研 · PRD |
-| [docs/03](docs/03-architecture.md) | 旧架构设计（已被 05 取代，存档） |
+| [docs/archive/03](docs/archive/03-architecture-v1.md) | 旧架构设计 v1（已被 05 取代，归档） |
 | [docs/04](docs/04-persistence.md) | 持久化设计（WAL + checkpoint + 验收套件） |
 | [docs/05](docs/05-architecture.md) | **现行架构**（As-Built，C4 + 决策记录） |
 | [CONTEXT.md](CONTEXT.md) | 领域术语表（词汇权威） |

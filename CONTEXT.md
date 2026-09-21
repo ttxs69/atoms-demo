@@ -36,7 +36,7 @@
 ### Sandbox（沙箱）
 **E2B 提供的一个 Firecracker microVM**，是生成的应用实际运行的地方。
 有 create / running / paused / killed 四个状态。
-- **不是** "容器" 也不是 "namespace"——那些是 `docs/03-architecture.md` 旧设计的词，
+- **不是** "容器" 也不是 "namespace"——那些是 `docs/archive/03-architecture-v1.md` 旧设计的词，
   已废弃（ticket 12）。
 - 关键属性：paused 状态**无限期保留、无 TTL、无自动删除**（ticket 13 的一手来源）
 
