@@ -5,6 +5,9 @@ node_modules/
 .env.*
 !.env.example
 
+# 安全事件复盘（含凭据清单/轮换状态，不入公开仓库）
+docs/security/
+
 # Next.js
 .next/
 out/
