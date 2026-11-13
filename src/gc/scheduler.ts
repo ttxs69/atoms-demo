@@ -7,8 +7,8 @@ import type { SqlClient } from '../credits/ledger.ts';
  * The daily GC trigger (forge-gc ticket 02's deferred wiring).
  *
  * The sweep function existed; nothing scheduled it. This rides the
- * long-running process (ticket 14's Railway single-machine conclusion) —
- * boot + every 24h. Swapping to Railway's cron service later is deploy
+ * long-running process (ticket 14's single-machine conclusion) —
+ * boot + every 24h. Swapping to an external cron service later is deploy
  * config: the sweep itself is the same function the delete-project route
  * calls. Failures log and never kill the timer (a dead scheduler is a
  * silent rot machine).

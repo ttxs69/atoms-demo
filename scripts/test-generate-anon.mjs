@@ -1,4 +1,4 @@
-const URL = 'https://forge-app-production-b189.up.railway.app';
+const URL = process.env.BASE_URL || 'http://localhost:3000';
 
 console.log('1. 模拟用户首次访问 /');
 const cookies = [];

@@ -25,7 +25,7 @@ Forge 是一个 AI 应用生成平台：用户用自然语言描述需求，多 
 
 | 决策 | 选择 | 理由 | 出处 |
 |---|---|---|---|
-| 运行时形态 | **长驻单机**：Railway 上一个 Node 进程同时跑 Next.js + orchestrator + GC 定时器 | SSE 继承函数时长限制（Vercel 300s 硬上限），完整生成链 1–3 分钟起 | ticket 14 |
+| 运行时形态 | **长驻单机**：一个 Node 进程同时跑 Next.js + orchestrator + GC 定时器 | SSE 继承函数时长限制（Vercel 300s 硬上限），完整生成链 1–3 分钟起 | ticket 14 |
 | 计算与存储 | **无状态计算层 + 每类数据唯一真相**：进程可随时死，真相在 Postgres / Storage | 微服务思想，不拆拓扑 | docs/04 §2 |
 | 状态管理 | 对话 = **WAL**（追加日志）；产物 = **checkpoint**（latest-wins 快照）；进程内 Map 仅缓存 | 两类资产时间语义不同 | docs/04 |
 | 执行隔离 | 每个 workspace 一个 **E2B Firecracker microVM**，`metadata.workspace_id` 标记 | 生成代码不可信，必须机检隔离 | ticket 12 |
@@ -37,7 +37,7 @@ Forge 是一个 AI 应用生成平台：用户用自然语言描述需求，多 
 ```mermaid
 flowchart LR
     U(["用户（浏览器）"])
-    FORGE["Forge（Railway 长驻单服务）<br/>AI 应用生成平台"]
+    FORGE["Forge（长驻单服务）<br/>AI 应用生成平台"]
     E2B["E2B 沙箱集群<br/>Firecracker microVM / workspace"]
     LLM["LLM 提供商<br/>DeepSeek 等，env 驱动"]
     SB["Supabase 项目<br/>auth / projects /<br/>project_events / Storage"]
@@ -57,9 +57,9 @@ flowchart LR
 flowchart TB
     U(["用户（浏览器）"])
 
-    subgraph RAILWAY["Railway 部署单元"]
+    subgraph RUNTIME["运行时部署单元"]
         NODE["Node 进程（长驻单机）<br/>app/ Next.js 路由层（薄壳）<br/>orchestrator/ 生成回合状态机<br/>gc/ 回收引擎 + 进程内定时器<br/>ports/ 六端口 + 适配器<br/>journal/ · credits/ · auth/ · domain/"]
-        PG[("平台 Postgres plugin<br/>quota / credit_ledger /<br/>bans / deletion_queue")]
+        PG[("平台 Postgres<br/>quota / credit_ledger /<br/>bans / deletion_queue")]
     end
 
     E2B["E2B 沙箱集群"]
@@ -201,7 +201,7 @@ sequenceDiagram
 
 ## 10. 部署架构
 
-Railway 单服务（`railway.json`）+ Postgres plugin + E2B/LLM/Supabase env 矩阵。
+单服务长驻（Node 进程 / 容器镜像）+ Postgres + E2B/LLM/Supabase env 矩阵（原 Railway 托管部署已于 2026-11-13 下线）。
 **发布检查单**：迁移须先于流量执行（`node scripts/apply-migration.mjs scripts/migrations/00N-*.sql`——005 漏跑已被 e2e 实证为承诺破裂点）。
 
 ## 11. 已知限制与技术债

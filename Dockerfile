@@ -1,10 +1,9 @@
 FROM node:22-slim AS builder
 WORKDIR /app
 # NEXT_PUBLIC_* must be present at BUILD time (Next.js inlines them into
-# the client JS bundle). Railway injects service variables as build args
-# when declared with ARG — single source of truth is the Railway env matrix,
-# NOT this file. (TURNSTILE_SITE_KEY was once hardcoded empty here, which
-# silently tree-shook the whole turnstile client out of the bundle.)
+# the client JS bundle). Pass them as --build-arg values; this file is not
+# the source of truth. (TURNSTILE_SITE_KEY was once hardcoded empty here,
+# which silently tree-shook the whole turnstile client out of the bundle.)
 ARG NEXT_PUBLIC_SUPABASE_URL
 ARG NEXT_PUBLIC_SUPABASE_ANON_KEY
 ARG NEXT_PUBLIC_APPS_SUPABASE_URL

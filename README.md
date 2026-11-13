@@ -44,7 +44,7 @@ E2B 沙箱（Firecracker microVM）中完成 规划 → 写码 → 安装 → �
 ## 架构概要
 
 ```
-浏览器 ──HTTPS/SSE──▶ Next.js 长驻单机（Railway）
+浏览器 ──HTTPS/SSE──▶ Next.js 长驻单机
                         ├─ orchestrator（生成回合状态机：单写者队列、
                         │   自修复、install→migrate→gate→build→dev 管线、热快照）
                         │   ├─ E2B 沙箱（生成应用运行处）
@@ -117,18 +117,12 @@ node scripts/apply-migration.mjs scripts/migrations/001-projects.sql
 | live | `npm run test:live` | 4 | 提示词漂移告警（真实模型，`RUN_LIVE=1` 显式触发） |
 
 e2e 需真实凭据且**串行执行**（真实 LLM/E2B 并行会触发限流）。
-CI（GitHub Actions）只跑离线部分：typecheck + 单测 + build；
-全绿是 Railway 部署的前置门禁（Wait for CI）。
+CI（GitHub Actions）只跑离线部分：typecheck + 单测 + build。
 
 ## 部署
 
-```bash
-bash scripts/deploy-railway.sh
-```
-
-交互式六阶段：创建项目 → 添加 Postgres → 设置环境变量 → 部署 →
-生成域名 → 部署后验证。连接 GitHub 仓库后，push `main` 即
-CI 绿 → 自动部署；`railway up --ci` 保留为手动通道。
+仓库不再包含托管平台部署配置（原 Railway 部署已下线）。
+本机自托管：`bash scripts/forge-quick-deploy.sh`（构建 + 启动 + Cloudflare Tunnel）。
 
 ## 项目结构
 

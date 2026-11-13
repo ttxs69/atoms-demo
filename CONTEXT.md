@@ -107,7 +107,7 @@ Forge **自己写**的跨系统回收组件。E2B 和 Supabase 都不替我们�
 - **关键区分**：不是"存储满了会硬故障"，而是"资源无限累积、无回收路径的软腐化"。
   E2B 的 paused 沙箱保留期是 Unlimited，且官方明确**没有** auto-kill 配置项。
 - 保留策略：匿名 workspace **30 天**无活动；沙箱**14 天**无访问。
-- 载体：事件驱动 + Railway cron 兜底 + Postgres `deletion_queue` 两阶段状态机。
+- 载体：事件驱动 + 进程内定时器兜底 + Postgres `deletion_queue` 两阶段状态机。
 - **前置条件**：沙箱创建时必须打 `metadata: { workspace_id }`，
   否则 `Sandbox.list()` 无法定位沙箱。相关 ticket：12 / 13
 
@@ -133,8 +133,8 @@ Postgres 里的一张表，GC 的持久化工作队列。
 ## 部署层
 
 ### 长驻单机（long-running single host）
-Forge 的运行时形态：**Railway** 上的一个 Node 进程同时跑 Next.js 和 Mastra orchestrator，
-外加一个 cron service 和一个 Postgres plugin。
+Forge 的运行时形态：一个 Node 进程同时跑 Next.js 和 Mastra orchestrator，
+外加一个进程内 GC 定时器和一个 Postgres 数据库（原 Railway 托管部署已于 2026-11-13 下线；本机自托管见 `scripts/forge-quick-deploy.sh`）。
 - 为什么不是 Serverless：**SSE 继承函数时长限制**（Vercel Hobby 300s 硬上限、Pro 800s），
   一次完整生成链 1–3 分钟起，自修复重试后更长。相关 ticket：14
 - **不是** k8s（旧设计），也不是多 service 微服务。

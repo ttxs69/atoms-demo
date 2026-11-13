@@ -52,7 +52,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'OTP 存储失败：' + dbErr.message }, { status: 500 });
   }
 
-  // 3. 邮件投递放后台——绝不阻塞响应（Ethereal 从 Railway 连很慢）
+  // 3. 邮件投递放后台——绝不阻塞响应（Ethereal SMTP 在托管环境里连接很慢）
   // eslint-disable-next-line @typescript-eslint/no-floating-promises
   (async () => {
     try {

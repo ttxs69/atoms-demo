@@ -10,7 +10,7 @@
  * - Atomicity: FOR UPDATE row lock inside a transaction.
  *
  * Tests run this against pglite (real Postgres, WASM); production runs the
- * same SQL against the Railway Postgres plugin. The concurrency guarantee is
+ * same SQL against a managed Postgres via DATABASE_URL. The concurrency guarantee is
  * the SQL semantics — pglite is single-connection, so interleavings are
  * simulated with sequential transactions, not real parallelism (noted in the
  * spec's testing decisions).

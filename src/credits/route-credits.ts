@@ -8,7 +8,7 @@ import type { CreditsPort } from '../ports/credits-port.ts';
  * Route-level credit wiring.
  *
  * Dev/test: one pglite instance for the process (no DATABASE_URL).
- * Production: the Railway Postgres plugin via DATABASE_URL — same SQL,
+ * Production: a managed Postgres via DATABASE_URL — same SQL,
  * real connections. The port is created once per process.
  */
 
@@ -28,7 +28,7 @@ async function createDb(): Promise<SqlClient & { transaction?: unknown }> {
     const { Client } = await import('pg');
     const client = new Client({
       connectionString: process.env['DATABASE_URL'],
-      // Managed Postgres (Supabase pooler / Railway) requires TLS; a local
+      // Managed Postgres (Supabase pooler / cloud Postgres) requires TLS; a local
       // plain Postgres just ignores the upgrade request.
       ssl: { rejectUnauthorized: false },
     });
